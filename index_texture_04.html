@@ -1,0 +1,148 @@
+
+<html>
+<head>
+<script src="build/three.min.js"></script>
+<!-- <script src="js_yuan/render.js"></script> -->
+
+<script id="vertShader" type="shader">
+varying vec2 vUv;
+varying vec3 vecPos;
+varying vec3 vecNormal;
+ 
+void main() {
+  vUv = uv;
+  // Since the light is in camera coordinates,
+  // I'll need the vertex position in camera coords too
+  vecPos = (modelViewMatrix * vec4(position, 1.0)).xyz;
+
+  // That's NOT exacly how you should transform your
+  // normals but this will work fine, since my model
+  // matrix is pretty basic
+  vecNormal = (modelViewMatrix * vec4(normal, 0.0)).xyz;
+  
+  gl_Position = projectionMatrix *
+                vec4(vecPos, 1.0);
+}
+</script>
+
+<script id="fragShader" type="shader">
+precision highp float;
+ 
+varying vec2 vUv;
+varying vec3 vecPos;
+varying vec3 vecNormal;
+
+uniform sampler2D textureSampler;
+
+void main(void) {
+
+  gl_FragColor = texture2D(textureSampler, vUv);
+                 
+}
+</script>
+
+
+
+</head>
+
+<!-- Div which will hold the Output -->
+<div id="WebGL-output">
+</div>
+
+<!-- Javascript code that runs our Three.js examples -->
+<script type="text/javascript">
+
+// FUNCTIONS
+function init() {
+
+  // standard global variables
+var scene, camera, renderer, textureLoader, light;
+
+// Character 3d object
+var character = null;
+
+  console.log('111');
+
+        // create a scene, that will hold all our elements such as objects, cameras and lights.
+        var scene = new THREE.Scene();
+
+        // create a camera, which defines where we're looking at.
+        var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+                // position and point the camera to the center of the scene
+        camera.position.x = -30;
+        camera.position.y = 40;
+        camera.position.z = 30;
+        camera.lookAt(scene.position);
+
+        // create a render and set the size
+        var renderer = new THREE.WebGLRenderer();
+
+        renderer.setClearColor(new THREE.Color(0xEEEEEE, 1.0));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+
+
+  // Create character
+  var sphereGeometry = new THREE.PlaneGeometry(1, 1);
+  textureLoader = new THREE.TextureLoader();
+  var creatureImage = textureLoader.load('assets/textures/basketball.png');
+  
+
+      var mat = new THREE.ShaderMaterial({
+        uniforms: THREE.UniformsUtils.merge([
+            THREE.UniformsLib['lights'],
+            {
+                lightIntensity: {type: 'f', value: 1.0},
+                textureSampler: {type: 't', value: null}
+            }
+        ]),
+        vertexShader: document.
+                      getElementById('vertShader').text,
+        fragmentShader: document.
+                        getElementById('fragShader').text,
+    });
+    // THREE.UniformsUtils.merge() call THREE.clone() on
+    // each uniform. We don't want our texture to be
+    // duplicated, so I assign it to the uniform value
+    // right here.
+    mat.uniforms.textureSampler.value = creatureImage;
+
+    //var sphereMaterial = new THREE.MeshLambertMaterial({color: 0x7777ff});
+
+    var obj = new THREE.Mesh(sphereGeometry, mat);
+
+    character = obj;
+
+  scene.add(character);
+  
+
+  // Start animation
+  //animate();
+
+        // var sphereGeometry = new THREE.SphereGeometry(4, 20, 20);
+        // var sphereMaterial = new THREE.MeshLambertMaterial({color: 0x7777ff});
+        // var sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+
+        // // position the sphere
+        // sphere.position.x = 20;
+        // sphere.position.y = 4;
+        // sphere.position.z = 2;
+        // sphere.castShadow = true;
+
+        // // add the sphere to the scene
+        // scene.add(sphere);
+
+          // add the output of the renderer to the html element
+        document.getElementById("WebGL-output").appendChild(renderer.domElement);
+
+  renderer.render(scene, camera);
+
+  console.log('fff2ddddd22');
+}
+            
+    window.onload = init;
+
+
+</script>
+</body>
+</html>

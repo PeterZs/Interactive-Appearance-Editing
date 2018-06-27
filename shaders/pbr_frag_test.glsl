@@ -1,11 +1,15 @@
 varying vec3 vViewPosition;
 varying vec3 vNormal;
 
+varying vec2 vUv;
+
 // uniforms
 uniform float metallic;
-uniform float roughness;
 uniform vec3 albedo;
 uniform int diffuseType;
+
+uniform sampler2D roughnessMap;
+uniform sampler2D diffuseMap;
 
 // defines
 #define PI 3.14159265359
@@ -242,9 +246,13 @@ void main() {
   geometry.viewDir = normalize(vViewPosition);
   
   Material material;
-  material.diffuseColor = mix(albedo, vec3(0.0), metallic);
-  material.specularColor = mix(vec3(0.04), albedo, metallic);
-  material.specularRoughness = roughness;
+  vec4 temp_dc = texture2D(diffuseMap, vUv);
+  vec3 dc = temp_dc.xyz;
+  material.diffuseColor = mix(dc, vec3(0.0), metallic);
+  material.specularColor = mix(vec3(0.04), dc, metallic);
+  vec4 roughnessVector = texture2D(roughnessMap, vUv);
+  float roughness = (roughnessVector.x + roughnessVector.y + roughnessVector.z)/3.0;
+  material.specularRoughness = roughness/255.0;
   
   // Lighting
   
@@ -282,4 +290,6 @@ void main() {
   vec3 outgoingLight = emissive + reflectedLight.directDiffuse + reflectedLight.directSpecular + reflectedLight.indirectDiffuse + reflectedLight.indirectSpecular;
   
   gl_FragColor = vec4(outgoingLight, opacity);
+  //gl_FragColor = texture2D(roughnessMap, vUv);
+
 }

@@ -50,11 +50,20 @@
 
             var container = document.getElementById( 'container' );
 
+            let canvas, ctx;
+            const size = 256;
+
             var camera, controls, scene, renderer;
             var mouseHelper;
             var line;
             var sphere;
             var stats;
+
+            let brushCanvas, brushCtx;
+            let eraserCanvas, eraserCtx;
+
+            let intersectionMesh;
+            let texture;
 
             var intersection = {
                 intersects: false,
@@ -152,6 +161,22 @@
 
                 controls.maxPolarAngle = Math.PI / 2;
 
+
+                // Height map.
+                canvas = document.createElement( 'canvas' );
+                ctx = canvas.getContext( '2d' );
+
+                canvas.width = size;
+                canvas.height = size;
+
+                canvas.style.position = 'fixed';
+                canvas.style.left = 0;
+                canvas.style.top = 0;
+
+                texture = new THREE.Texture( canvas );
+                document.body.appendChild( canvas );
+
+
                 // material
                 uniforms = {
                     metallic: {value: 0.3},
@@ -202,7 +227,7 @@
 //
                 
 // //        var mat = new THREE.MeshBasicMaterial();
-         var mat = new THREE.MeshBasicMaterial({map: texture});
+                var mat = new THREE.MeshBasicMaterial({map: texture});
 //         var geom = new THREE.BoxGeometry(24, 24, 24);
 //         var mesh = new THREE.Mesh(geom, mat);
 

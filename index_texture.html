@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Demo</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+        <style>
+            body {
+                color: #000;
+                font-family:Monospace;
+                font-size:13px;
+                text-align:center;
+                font-weight: bold;
+
+                background-color: #fff;
+                margin: 0px;
+                overflow: hidden;
+            }
+
+            #info {
+                color:#000;
+                position: absolute;
+                top: 0px; width: 100%;
+                padding: 5px;
+
+            }
+
+            a {
+                color: red;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div id="container"></div>
+
+        <div id="info">
+        </div>
+
+        <script src="build/three.js"></script>
+        <script src="js/controls/OrbitControls.js"></script>
+        <script src="js/Detector.js"></script>
+        <script src="js/libs/stats.min.js"></script>
+        <script src="js/libs/dat.gui.min.js"></script>
+        <script src="js_yuan/loadFiles.js"></script>
+
+        <script>
+
+            console.log("1111");
+
+            if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+            console.log("2222");
+
+            loadShaders();
+
+            function loadShaders() {
+
+                console.log("3333");
+
+                loadFiles([
+                  'shaders/texture_demo_vert.glsl',
+                  'shaders/texture_demo_frag.glsl'
+                ], function(shaders) {
+
+                    console.log(shaders);
+                    initScene(shaders);
+
+                    // EVENTS
+                    //window.addEventListener('resize', onWindowResize, false);
+             
+                }, function(url) {
+                  alert('Failed to download "' + url + '"');
+                });
+            }
+
+            function initScene(shaders, imagedata) {
+
+
+
+                // Initialize WebGL Renderer
+                var renderer = new THREE.WebGLRenderer();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                //var canvas = document.getElementById('canvas').appendChild(renderer.domElement);
+
+                // Initialize Scenes
+                var scene = new THREE.Scene();
+
+                // Initialize Camera
+                var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 100);
+                camera.position.z = 10;
+
+                // Create Light
+                var light = new THREE.PointLight(0xFFFFFF);
+                light.position.set(0, 0, 500);
+                scene.add(light);
+
+                var uniforms = {
+                    texture1: { type: 't', value: THREE.ImageUtils.loadTexture( 'assets/textures/basketball.png' ) }
+                };
+
+                var material = new THREE.ShaderMaterial({
+                    uniforms: uniforms,
+                    vertexShader: shaders['texture_demo_vert'],
+                    fragmentShader: shaders['texture_demo_frag']
+                });
+
+                var ball = new THREE.Mesh(new THREE.SphereGeometry(1, 50, 50), material);
+                scene.add(ball);
+
+                // Render the Scene
+                renderer.render(scene, camera);
+
+            }
+            
+
+        </script>
+
+    </body>
+</html>

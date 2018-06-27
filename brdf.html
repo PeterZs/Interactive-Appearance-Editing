@@ -99,8 +99,8 @@
             function loadShaders() {
 
                 loadFiles([
-                  'shaders/pbr_vert_test.glsl',
-                  'shaders/pbr_frag_test.glsl'
+                  'shaders/pbr_vert.glsl',
+                  'shaders/pbr_frag.glsl'
                 ], function(shaders) {
 
                     var loader = new THREE.ImageLoader();
@@ -174,27 +174,24 @@
 
                 // controls
                 controls = new THREE.OrbitControls( camera, renderer.domElement );
+
                 //controls.addEventListener( 'change', render ); // call this only in static scenes (i.e., if there is no animation loop)
+
                 controls.enableDamping = true; // an animation loop is required when either damping or auto-rotation are enabled
                 controls.dampingFactor = 0.25;
+
                 controls.screenSpacePanning = false;
+
                 controls.minDistance = 10;
                 controls.maxDistance = 1000
-                controls.maxPolarAngle = Math.PI / 2;
 
-                // texture
-                var roughnessMap = new THREE.TextureLoader().load( "assets/textures/brick_roughness.jpg" );
-                //roughnessMap.needsUpdate = true; // important
-                var diffuseMap = new THREE.TextureLoader().load( "assets/textures/brick_diffuse.jpg" );
-                //diffuseMap.needsUpdate = true; // important
+                controls.maxPolarAngle = Math.PI / 2;
 
                 // material
                 uniforms = {
                     metallic: {value: 0.3},
                     roughness: {value: 0.1},
                     albedo: {value: new THREE.Color(0xffff00)},
-                    roughnessMap: { type: "t", value: roughnessMap },
-                    diffuseMap: { type: "t", value: diffuseMap },
                     diffuseType: {value:0},
                     pointLights: {value:[]},
                     spotLights: {value:[]},
@@ -227,17 +224,27 @@
                         color: new THREE.Color(1,1,1)
                     });
                 }
+
+                test_color = getPixel( imagedata, 100, 10 );
+
+                var color = new THREE.Color( test_color.r/255, test_color.g/255, test_color.b/255,  );
+                
+                console.log(color);
+
+                var texture = new THREE.TextureLoader().load("assets/textures/basketball.png");
+                var mat = new THREE.MeshBasicMaterial({map: texture});
      
                 material = new THREE.ShaderMaterial({
                     uniforms: uniforms,
-                    vertexShader: shaders['pbr_vert_test'],
-                    fragmentShader: shaders['pbr_frag_test']
+                    vertexShader: shaders['pbr_vert'],
+                    fragmentShader: shaders['pbr_frag']
                 });
 
-                /*
                 // create a sphere
                 var sphereGeometry = new THREE.SphereGeometry(5, 20, 20);
-
+                //var sphereMaterial = new THREE.MeshBasicMaterial({color: 0x7777ff, wireframe: true});
+                //var sphereMaterial = new THREE.MeshBasicMaterial({color: 0x7777ff});
+                //var sphereMaterial = new THREE.MeshLambertMaterial({color: 0xffffff});
                 sphere = new THREE.Mesh(sphereGeometry, material);
                 sphere.material.texture = texture;
 
@@ -248,20 +255,22 @@
 
                 // add the sphere to the scene
                 scene.add(sphere);
-                */
 
-                // cube geometry
-                var boxGeometry = new THREE.BoxGeometry( 10, 10, 10 );
-                box = new THREE.Mesh( boxGeometry, material );
-                box.position.x = 0;
-                box.position.y = 0;
-                box.position.z = 0;
-                scene.add( box );
+                // ground
+                var groundGeometry = new THREE.PlaneGeometry(100, 100);
+                //var groundMaterial = new THREE.MeshLambertMaterial({color: 0x22eeaa});
+                var ground = new THREE.Mesh(groundGeometry, material);
+                ground.rotation.x = -0.5 * Math.PI;
+                // position the ground
+                ground.position.x = 0;
+                ground.position.y = -10;
+                ground.position.z = 0;
+                scene.add(ground);
 
                 // light
                 lights = {};
-                lights.directional = new THREE.DirectionalLight(0xffffff, 10.0);
-                lights.directional.position.set(-3,10,-3);
+                lights.directional = new THREE.DirectionalLight(0xffffff, 1.0);
+                lights.directional.position.set(-3,15,-3);
                 lights.directionalHelper = new THREE.DirectionalLightHelper(lights.directional, 1.0);
 
                 lights.point = new THREE.PointLight(0xffffff, 1, 20.0);
@@ -270,7 +279,7 @@
                 lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0);
 
                 lights.spot = new THREE.SpotLight(0xffffff, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
-                lights.spot.position.set(-10, 10, 0);
+                lights.spot.position.set(-15, 10, 0);
                 lights.spotHelper = new THREE.SpotLightHelper(lights.spot, 1.0);
                 
                 // adding lights and lighthelper to the scene

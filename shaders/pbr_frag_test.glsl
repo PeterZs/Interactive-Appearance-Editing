@@ -10,6 +10,8 @@ uniform int diffuseType;
 
 uniform sampler2D roughnessMap;
 uniform sampler2D diffuseMap;
+uniform sampler2D normalMap;
+uniform sampler2D bumpMap;
 
 // defines
 #define PI 3.14159265359
@@ -239,17 +241,60 @@ void RE_Direct(const in IncidentLight directLight, const in GeometricContext geo
   reflectedLight.directSpecular += irradiance * SpecularBRDF(directLight, geometry, material.specularColor, material.specularRoughness);
 }
 
+// Convert bump map to normal map
+
+float textureSize = 1024.0;
+float texelSize =  1.0 / textureSize ; //size of one texel;
+float normalStrength = 20.0;
+ 
+vec3 ComputeNormals(){
+
+  float tl = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1, -1)).x);   // top left
+  float  l = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
+  float bl = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1,  1)).x);   // bottom left
+  float  t = abs(texture2D (bumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
+  float  b = abs(texture2D (bumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
+  float tr = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1, -1)).x);   // top right
+  float  r = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
+  float br = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1,  1)).x);   // bottom right
+
+
+  // Compute dx using Sobel:
+  //           -1 0 1 
+  //           -2 0 2
+  //           -1 0 1
+
+  float dX = tr + 2.0*r + br -tl - 2.0*l - bl;
+
+  // Compute dy using Sobel:
+  //           -1 -2 -1 
+  //            0  0  0
+  //            1  2  1
+
+  float dY = bl + 2.0*b + br -tl - 2.0*t - tr;
+
+  // Build the normalized normal
+  vec3 N = normalize(vec3(dX, 1.0 / normalStrength, dY));
+
+  //convert (-1.0 , 1.0) to (0.0 , 1.0), if needed
+  return N * 0.5 + 0.5;
+}
+
+
 void main() {
+
   GeometricContext geometry;
   geometry.position = -vViewPosition;
-  geometry.normal = normalize(vNormal);
+  vec3 normal = ComputeNormals();
+  normal = normalize(normal * 2.0 - 1.0);
+  geometry.normal = normalize(normal);
   geometry.viewDir = normalize(vViewPosition);
   
   Material material;
   vec4 temp_dc = texture2D(diffuseMap, vUv);
   vec3 dc = temp_dc.xyz;
   material.diffuseColor = mix(dc, vec3(0.0), metallic);
-  material.specularColor = mix(vec3(0.04), dc, metallic);
+  material.specularColor = mix(vec3(0.0), dc, metallic);
   vec4 roughnessVector = texture2D(roughnessMap, vUv);
   float roughness = (roughnessVector.x + roughnessVector.y + roughnessVector.z)/3.0;
   material.specularRoughness = roughness/255.0;
@@ -287,7 +332,7 @@ void main() {
     RE_Direct(directLight, geometry, material, reflectedLight);
   }
   
-  vec3 outgoingLight = emissive + reflectedLight.directDiffuse + reflectedLight.directSpecular + reflectedLight.indirectDiffuse + reflectedLight.indirectSpecular;
+  vec3 outgoingLight = emissive + reflectedLight.directDiffuse + reflectedLight.directSpecular;
   
   gl_FragColor = vec4(outgoingLight, opacity);
   //gl_FragColor = texture2D(roughnessMap, vUv);

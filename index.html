@@ -29,6 +29,7 @@
                 color: red;
             }
         </style>
+
     </head>
 
     <body>
@@ -187,14 +188,19 @@
                 //roughnessMap.needsUpdate = true; // important
                 var diffuseMap = new THREE.TextureLoader().load( "assets/textures/brick_diffuse.jpg" );
                 //diffuseMap.needsUpdate = true; // important
+                var normalMap = new THREE.TextureLoader().load( "assets/textures/waternormals.jpg" );
+                var bumpMap =  new THREE.TextureLoader().load( "assets/textures/brick_bump.jpg" );
+
 
                 // material
                 uniforms = {
-                    metallic: {value: 0.3},
-                    roughness: {value: 0.1},
+                    metallic: {value: 0.0},
+                    roughness: {value: 0.0},
                     albedo: {value: new THREE.Color(0xffff00)},
                     roughnessMap: { type: "t", value: roughnessMap },
                     diffuseMap: { type: "t", value: diffuseMap },
+                    normalMap: { type: "t", value: normalMap },
+                    bumpMap: { type: "t", value: bumpMap },
                     diffuseType: {value:0},
                     pointLights: {value:[]},
                     spotLights: {value:[]},
@@ -269,7 +275,7 @@
 
                 lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0);
 
-                lights.spot = new THREE.SpotLight(0xffffff, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
+                lights.spot = new THREE.SpotLight(0x00ff00, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
                 lights.spot.position.set(-10, 10, 0);
                 lights.spotHelper = new THREE.SpotLightHelper(lights.spot, 1.0);
                 
@@ -430,9 +436,9 @@
                 //gui.addColor(params, 'color');
 
                 gui.add(effectController, "drawLight");
-                gui.addColor(effectController, 'albedo');
-                gui.add(effectController, "metallic", 0.0, 1.0, 0.01);
-                gui.add(effectController, "roughness", 0.0, 1.0, 0.01);
+                //gui.addColor(effectController, 'albedo');
+                //gui.add(effectController, "metallic", 0.0, 1.0, 0.01);
+                //gui.add(effectController, "roughness", 0.0, 1.0, 0.01);
 
                 gui.open();
             }

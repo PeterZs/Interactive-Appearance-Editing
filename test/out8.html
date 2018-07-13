@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Demo</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+        <style>
+            body {
+                color: #000;
+                font-family:Monospace;
+                font-size:13px;
+                text-align:center;
+                font-weight: bold;
+
+                background-color: #fff;
+                margin: 0px;
+                overflow: hidden;
+            }
+
+            #info {
+                color:#000;
+                position: absolute;
+                top: 0px; width: 100%;
+                padding: 5px;
+
+            }
+
+            a {
+                color: red;
+            }
+        </style>
+
+        <script id="vertexShader" type="x-shader/x-vertex">
+            varying vec3 vViewPosition;
+            varying vec3 vNormal;
+
+            uniform sampler2D roughnessMap;
+            uniform sampler2D diffuseMap;
+            varying vec2 vUv;
+
+            void main() {
+
+              vUv = uv;
+              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+              gl_Position = projectionMatrix * mvPosition;
+              vViewPosition = -mvPosition.xyz;
+              vNormal = normalMatrix * normal;
+
+            }        
+        </script>
+
+        <script id="fragmentShader" type="x-shader/x-fragment">
+            varying vec3 vViewPosition;
+            varying vec3 vNormal;
+
+            varying vec2 vUv;
+
+            // uniforms
+            uniform float metallic;
+            uniform vec3 albedo;
+            uniform int diffuseType;
+
+            uniform sampler2D roughnessMap;
+            uniform sampler2D diffuseMap;
+            uniform sampler2D normalMap;
+            uniform sampler2D bumpMap;
+
+            // defines
+            #define PI 3.14159265359
+            #define PI2 6.28318530718
+            #define RECIPROCAL_PI 0.31830988618
+            #define RECIPROCAL_PI2 0.15915494
+            #define LOG2 1.442695
+            #define EPSILON 1e-6
+
+            struct IncidentLight {
+              vec3 color;
+              vec3 direction;
+              bool visible;
+            };
+
+            struct ReflectedLight {
+              vec3 directDiffuse;
+              vec3 directSpecular;
+              vec3 indirectDiffuse;
+              vec3 indirectSpecular;
+            };
+
+            struct GeometricContext {
+              vec3 position;
+              vec3 normal;
+              vec3 viewDir;
+            };
+
+            struct Material {
+              vec3 diffuseColor;
+              float specularRoughness;
+              vec3 specularColor;
+            };
+
+            // lights
+
+            bool testLightInRange(const in float lightDistance, const in float cutoffDistance) {
+              return any(bvec2(cutoffDistance == 0.0, lightDistance < cutoffDistance));
+            }
+
+            float punctualLightIntensityToIrradianceFactor(const in float lightDistance, const in float cutoffDistance, const in float decayExponent) {
+              if (decayExponent > 0.0) {
+                return pow(saturate(-lightDistance / cutoffDistance + 1.0), decayExponent);
+              }
+              
+              return 1.0;
+            }
+
+            struct DirectionalLight {
+              vec3 direction;
+              vec3 color;
+            };
+
+            void getDirectionalDirectLightIrradiance(const in DirectionalLight directionalLight, const in GeometricContext geometry, out IncidentLight directLight) {
+              directLight.color = directionalLight.color;
+              directLight.direction = directionalLight.direction;
+              directLight.visible = true;
+            }
+
+            struct PointLight {
+              vec3 position;
+              vec3 color;
+              float distance;
+              float decay;
+            };
+
+            void getPointDirectLightIrradiance(const in PointLight pointLight, const in GeometricContext geometry, out IncidentLight directLight) {
+              vec3 L = pointLight.position - geometry.position;
+              directLight.direction = normalize(L);
+              
+              float lightDistance = length(L);
+              if (testLightInRange(lightDistance, pointLight.distance)) {
+                directLight.color = pointLight.color;
+                directLight.color *= punctualLightIntensityToIrradianceFactor(lightDistance, pointLight.distance, pointLight.decay);
+                directLight.visible = true;
+              } else {
+                directLight.color = vec3(0.0);
+                directLight.visible = false;
+              }
+            }
+
+            struct SpotLight {
+              vec3 position;
+              vec3 direction;
+              vec3 color;
+              float distance;
+              float decay;
+              float coneCos;
+              float penumbraCos;
+            };
+
+            void getSpotDirectLightIrradiance(const in SpotLight spotLight, const in GeometricContext geometry, out IncidentLight directLight) {
+              vec3 L = spotLight.position - geometry.position;
+              directLight.direction = normalize(L);
+              
+              float lightDistance = length(L);
+              float angleCos = dot(directLight.direction, spotLight.direction);
+              
+              if (all(bvec2(angleCos > spotLight.coneCos, testLightInRange(lightDistance, spotLight.distance)))) {
+                float spotEffect = smoothstep(spotLight.coneCos, spotLight.penumbraCos, angleCos);
+                directLight.color = spotLight.color;
+                directLight.color *= spotEffect * punctualLightIntensityToIrradianceFactor(lightDistance, spotLight.distance, spotLight.decay);
+                directLight.visible = true;
+              } else {
+                directLight.color = vec3(0.0);
+                directLight.visible = false;
+              }
+            }
+
+            // light uniforms
+            #define LIGHT_MAX 4
+            uniform DirectionalLight directionalLights[LIGHT_MAX];
+            uniform PointLight pointLights[LIGHT_MAX];
+            uniform SpotLight spotLights[LIGHT_MAX];
+            uniform int numDirectionalLights;
+            uniform int numPointLights;
+            uniform int numSpotLights;
+
+            // BRDFs
+
+            vec3 GGXOrenNayarDiffuse(vec3 color, float dotNL, float dotNV, float dotNH, float dotLH, float dotLV, float roughness, float a) {
+              float f0 = 0.04;
+              float theta_i = acos(dotNL);
+              float theta_r = acos(dotNV);
+              float cos_phi_diff = (dotLV - dotNL*dotNV) / (sin(theta_i)*sin(theta_r) + EPSILON);
+              
+              float Fr1 = (1.0 - (0.542026*a + 0.303573*roughness) / (a + 1.36053));
+              float Fr2 = (1.0 - (pow(1.0 - dotNV, 5.0 - 4.0*a)) / (a + 1.36053));
+              float Fr3 = (-0.733996*a*roughness + 1.50912*a - 1.16402*roughness);
+              float Fr4 = (pow(1.0 - dotNV, 1.0 + (1.0 / (39.0*a*a + 1.0))));
+              float Fr = Fr1*Fr2*(Fr3*Fr4+1.0);
+              float Lm1 = (max(1.0 - (2.0*roughness), 0.0)*(1.0 - pow(1.0 - dotNL, 5.0)) + min(2.0*roughness, 1.0)); 
+              float Lm2 = ((1.0 - 0.5*roughness)*dotNL + (0.5*roughness)*(pow(dotNL, 2.0)));
+                float Lm = Lm1 * Lm2;
+                float Vd1 = (a / ((a + 0.09)*(1.31072 + 0.995584*dotNV)));
+              float Vd2 = (1.0 - (pow(1.0 - dotNL, (1.0 - 0.3726732*(dotNV*dotNV)) / (0.188566 + 0.38841*dotNV))));
+              float Vd = Vd1*Vd2;
+              float Bp = dotLV - (dotNV*dotNL);
+                if (Bp < 0.0) Bp *= 1.4*dotNV*dotNL;
+              float L1 = 1.05*(1.0 - f0)*(Fr*Lm + Vd*Bp);
+              return color*(L1*RECIPROCAL_PI);
+            }
+
+            vec3 GGXApproxDiffuse(vec3 color, float dotNL, float dotNV, float dotNH, float dotLH, float dotLV, float roughness, float a) {
+              float facing = 0.5 + 0.5*dotLV;
+              float rough  = facing*(0.9-0.4*facing)*((0.5+dotNH)/dotNH);
+              float Smooth = 1.05*(1.0-pow(1.0-dotNL, 5.0)) * (1.0-pow(1.0-dotNV, 5.0));
+              float single = mix(Smooth, rough, a) * RECIPROCAL_PI;
+              float multi  = 0.1159*a;
+              return color*(vec3(single) + color*multi);
+            }
+
+            // Normalized Lambert
+            vec3 DiffuseBRDF(const in IncidentLight directLight, const in GeometricContext geometry, vec3 diffuseColor, float roughnessFactor) {
+
+              vec3 N = geometry.normal;
+              vec3 V = geometry.viewDir;
+              vec3 L = directLight.direction;
+              
+              float dotNL = saturate(dot(N,L));
+              float dotNV = saturate(dot(N,V));
+              vec3 H = normalize(L+V);
+              float dotNH = saturate(dot(N,H));
+              float dotVH = saturate(dot(V,H));
+              float dotLH = saturate(dot(L,H));
+              float dotLV = saturate(dot(L,V));
+              float a = roughnessFactor * roughnessFactor;
+              
+              if (diffuseType >= 9) {
+                return GGXApproxDiffuse(diffuseColor, dotNL, dotNV, dotLH, dotVH, dotLV, roughnessFactor, a);
+              }
+              else if (diffuseType >= 8) {
+                return GGXOrenNayarDiffuse(diffuseColor, dotNL, dotNV, dotLH, dotVH, dotLV, roughnessFactor, a);
+              }
+            }
+
+            vec3 F_Schlick(vec3 specularColor, vec3 H, vec3 V) {
+              return (specularColor + (1.0 - specularColor) * pow(1.0 - saturate(dot(V,H)), 5.0));
+            }
+
+            float D_GGX(float a, float dotNH) {
+              float a2 = a*a;
+              float dotNH2 = dotNH*dotNH;
+              float d = dotNH2 * (a2 - 1.0) + 1.0;
+              return a2 / (PI * d * d);
+            }
+
+            float G_Smith_Schlick_GGX(float a, float dotNV, float dotNL) {
+              float k = a*a*0.5 + EPSILON;
+              float gl = dotNL / (dotNL * (1.0 - k) + k);
+              float gv = dotNV / (dotNV * (1.0 - k) + k);
+              return gl*gv;
+            }
+
+            // Cook-Torrance
+            vec3 SpecularBRDF(const in IncidentLight directLight, const in GeometricContext geometry, vec3 specularColor, float roughnessFactor) {
+              
+              vec3 N = geometry.normal;
+              vec3 V = geometry.viewDir;
+              vec3 L = directLight.direction;
+              
+              float dotNL = saturate(dot(N,L));
+              float dotNV = saturate(dot(N,V));
+              vec3 H = normalize(L+V);
+              float dotNH = saturate(dot(N,H));
+              float dotVH = saturate(dot(V,H));
+              float dotLV = saturate(dot(L,V));
+              float a = roughnessFactor * roughnessFactor;
+
+              float D = D_GGX(a, dotNH);
+              float G = G_Smith_Schlick_GGX(a, dotNV, dotNL);
+              vec3 F = F_Schlick(specularColor, V, H);
+              return (F*(G*D))/(4.0*dotNL*dotNV+EPSILON);
+            }
+
+            // RenderEquations(RE)
+            void RE_Direct(const in IncidentLight directLight, const in GeometricContext geometry, const in Material material, inout ReflectedLight reflectedLight) {
+              
+              float dotNL = saturate(dot(geometry.normal, directLight.direction));
+              vec3 irradiance = dotNL * directLight.color;
+              
+              // punctual light
+              irradiance *= PI;
+              
+              reflectedLight.directDiffuse += irradiance * DiffuseBRDF(directLight, geometry, material.diffuseColor, material.specularRoughness);
+
+              reflectedLight.directSpecular += irradiance * SpecularBRDF(directLight, geometry, material.specularColor, material.specularRoughness);
+            }
+
+            // Convert bump map to normal map
+
+            float textureSize = 1024.0;
+            float texelSize =  1.0 / textureSize ; //size of one texel;
+            float normalStrength = 20.0;
+             
+            vec3 ComputeNormals(){
+
+              float tl = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1, -1)).x);   // top left
+              float  l = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
+              float bl = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1,  1)).x);   // bottom left
+              float  t = abs(texture2D (bumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
+              float  b = abs(texture2D (bumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
+              float tr = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1, -1)).x);   // top right
+              float  r = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
+              float br = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1,  1)).x);   // bottom right
+
+
+              // Compute dx using Sobel:
+              //           -1 0 1 
+              //           -2 0 2
+              //           -1 0 1
+
+              float dX = tr + 2.0*r + br -tl - 2.0*l - bl;
+
+              // Compute dy using Sobel:
+              //           -1 -2 -1 
+              //            0  0  0
+              //            1  2  1
+
+              float dY = bl + 2.0*b + br -tl - 2.0*t - tr;
+
+              // Build the normalized normal
+              vec3 N = normalize(vec3(dX, 1.0 / normalStrength, dY));
+
+              //convert (-1.0 , 1.0) to (0.0 , 1.0), if needed
+              return N * 0.5 + 0.5;
+            }
+
+
+            void main() {
+
+              GeometricContext geometry;
+              geometry.position = -vViewPosition;
+              vec3 normal = ComputeNormals();
+              normal = normalize(normal * 2.0 - 1.0);
+              geometry.normal = normalize(normal);
+              geometry.viewDir = normalize(vViewPosition);
+              
+              Material material;
+              vec4 temp_dc = texture2D(diffuseMap, vUv);
+              vec3 dc = temp_dc.xyz;
+              
+              material.diffuseColor = mix(dc, vec3(0.0), metallic);
+              material.specularColor = mix(vec3(0.0), dc, metallic);
+
+              vec4 roughnessVector = texture2D(roughnessMap, vUv);
+              float roughness = (roughnessVector.x + roughnessVector.y + roughnessVector.z)/3.0;
+              material.specularRoughness = roughness/255.0;
+              
+              // Lighting
+              
+              ReflectedLight reflectedLight = ReflectedLight(vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
+              vec3 emissive = vec3(0.0);
+              float opacity = 1.0;
+              
+              IncidentLight directLight;
+              
+              // point light
+              /*
+              for (int i=0; i<LIGHT_MAX; ++i) {
+                if (i >= numPointLights) break;
+                getPointDirectLightIrradiance(pointLights[i], geometry, directLight);
+                if (directLight.visible) {
+                  RE_Direct(directLight, geometry, material, reflectedLight);
+                }
+              }
+              */
+              
+              // spot light
+              for (int i=0; i<LIGHT_MAX; ++i) {
+                if (i >= numSpotLights) break;
+                getSpotDirectLightIrradiance(spotLights[i], geometry, directLight);
+                if (directLight.visible) {
+                  RE_Direct(directLight, geometry, material, reflectedLight);
+                }
+              }
+              
+              // directional light
+              for (int i=0; i<LIGHT_MAX; ++i) {
+                if (i >= numDirectionalLights) break;
+                getDirectionalDirectLightIrradiance(directionalLights[i], geometry, directLight);
+                RE_Direct(directLight, geometry, material, reflectedLight);
+              }
+              
+              
+              //vec3 outgoingLight = emissive + reflectedLight.directDiffuse + reflectedLight.directSpecular;
+
+              vec3 outgoingLight = emissive + reflectedLight.directDiffuse;
+              
+              gl_FragColor = vec4(outgoingLight, opacity);
+              //gl_FragColor = texture2D(roughnessMap, vUv);
+
+            }
+        </script>
+
+    </head>
+
+    <body>
+        <div id="container"></div>
+
+        <div id="info">
+        </div>
+
+        <script src="build/three.js"></script>
+        <script src="js/controls/OrbitControls.js"></script>
+        <script src="js/Detector.js"></script>
+        <script src="js/libs/stats.min.js"></script>
+        <script src="js/libs/dat.gui.min.js"></script>
+        <script src="js_yuan/loadFiles.js"></script>
+
+        <script>
+
+            if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+            var container = document.getElementById( 'container' );
+
+            var camera, controls, scene, renderer;
+            var mouseHelper;
+            var line;
+            var sphere;
+            var stats;
+
+            // texture image
+            var imagedata;
+
+            var intersection = {
+                intersects: false,
+                point: new THREE.Vector3(),
+                normal: new THREE.Vector3()
+            };
+
+            var params = {
+                color: "#ffae23",
+                clear: function() {
+
+                }
+            };
+            
+            var mouse = new THREE.Vector2();
+
+            loadShaders();
+
+            function getImageData( image ) {
+
+                var canvas = document.createElement( 'canvas' );
+                canvas.width = image.width;
+                canvas.height = image.height;
+
+                var context = canvas.getContext( '2d' );
+                context.drawImage( image, 0, 0 );
+
+                return context.getImageData( 0, 0, image.width, image.height );
+
+            }                
+
+            function getPixel( imagedata, x, y ) {
+
+                var position = ( x + imagedata.width * y ) * 4, data = imagedata.data;
+                return { r: data[ position ], g: data[ position + 1 ], b: data[ position + 2 ], a: data[ position + 3 ] };
+
+            }
+      
+            function loadShaders() {
+
+                loadFiles([
+                  'shaders/pbr_vert_test.glsl',
+                  'shaders/pbr_frag_test.glsl'
+                ], function(shaders) {
+
+                    var loader = new THREE.ImageLoader();
+
+                    loader.load( "assets/textures/basketball.png", function ( image ) {
+                        
+                        imagedata = getImageData( image );
+
+                        initGraphics();
+                        initScene(shaders, imagedata);
+
+                        // EVENTS
+                        window.addEventListener('resize', onWindowResize, false);
+                  
+                        animate();
+
+                    } );
+
+
+                  
+
+                }, function(url) {
+                  alert('Failed to download "' + url + '"');
+                });
+            }
+
+            function initGraphics() {
+                // container = document.createElement('div');
+                // document.body.appendChild(container);
+
+                // // renderer
+                // renderer = new THREE.WebGLRenderer({antialias: true});
+                // renderer.setClearColor(0xdddddd);
+                // renderer.setPixelRatio(window.devicePixelRatio);
+                // renderer.setSize(window.innerWidth, window.innerHeight);
+                // // renderer.gammaInput = true;
+                // // renderer.gammaOutput = true;
+                // renderer.autoClear = true;
+                // container.appendChild(renderer.domElement);
+
+                // // stats
+                // stats = new Stats();
+                // container.appendChild(stats.dom);
+            }
+
+            function initScene(shaders, imagedata) {
+
+                // scene
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color( 0xcccccc );
+                scene.fog = new THREE.FogExp2( 0xcccccc, 0.002 );
+
+                renderer = new THREE.WebGLRenderer( { antialias: true } );
+                renderer.setPixelRatio( window.devicePixelRatio );
+                renderer.setSize( window.innerWidth, window.innerHeight );
+                renderer.shadowMap.enabled = true;
+                document.body.appendChild( renderer.domElement );
+
+                stats = new Stats();
+                container.appendChild( stats.dom );
+
+                // axes helper
+                // show axes in the screen
+                var axes = new THREE.AxesHelper(50);
+                scene.add(axes);
+
+                // camera
+                camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 1, 1000 );
+                camera.position.set( -15, 15, 15 );
+                camera.lookAt(scene.position);
+
+                // controls
+                controls = new THREE.OrbitControls( camera, renderer.domElement );
+                //controls.addEventListener( 'change', render ); // call this only in static scenes (i.e., if there is no animation loop)
+                controls.enableDamping = true; // an animation loop is required when either damping or auto-rotation are enabled
+                controls.dampingFactor = 0.25;
+                controls.screenSpacePanning = false;
+                controls.minDistance = 10;
+                controls.maxDistance = 1000
+                controls.maxPolarAngle = Math.PI / 2;
+
+                // texture
+                var roughnessMap = new THREE.TextureLoader().load( "assets/textures/brick_roughness.jpg" );
+                //roughnessMap.needsUpdate = true; // important
+                var diffuseMap = new THREE.TextureLoader().load( "assets/textures/brick_diffuse.jpg" );
+                //diffuseMap.needsUpdate = true; // important
+                var normalMap = new THREE.TextureLoader().load( "assets/textures/waternormals.jpg" );
+                var bumpMap =  new THREE.TextureLoader().load( "assets/textures/brick_bump.jpg" );
+
+
+                // material
+                uniforms = {
+                    metallic: {value: 0.0},
+                    roughness: {value: 0.0},
+                    albedo: {value: new THREE.Color(0xffff00)},
+                    roughnessMap: { type: "t", value: roughnessMap },
+                    diffuseMap: { type: "t", value: diffuseMap },
+                    normalMap: { type: "t", value: normalMap },
+                    bumpMap: { type: "t", value: bumpMap },
+                    diffuseType: {value:0},
+                    pointLights: {value:[]},
+                    spotLights: {value:[]},
+                    directionalLights: {value:[]},
+                    numPointLights: {value: 0},
+                    numSpotLights: {value: 0},
+                    numDirectionalLights: {value: 0}
+                };
+                
+                for (var i=0; i<4; ++i) {
+                    uniforms.pointLights.value.push({
+                        position: new THREE.Vector3(0,0,0),
+                        color: new THREE.Color(1,1,1),
+                        distance: 1.0,
+                        decay: 10.0
+                    });
+                  
+                    uniforms.spotLights.value.push({
+                        position: new THREE.Vector3(0,0,0),
+                        color: new THREE.Color(1,1,1),
+                        direction: new THREE.Vector3(0,0,1),
+                        distance: 1.0,
+                        decay: 10.0,
+                        coneCos: 0.0,
+                        pnumbraCos: 0.0
+                    });
+                  
+                    uniforms.directionalLights.value.push({
+                        direction: new THREE.Vector3(0,0,1),
+                        color: new THREE.Color(1,1,1)
+                    });
+                }
+     
+                // material = new THREE.ShaderMaterial({
+                //     uniforms: uniforms,
+                //     vertexShader: shaders['pbr_vert_test'],
+                //     fragmentShader: shaders['pbr_frag_test']
+                // });
+
+                material = new THREE.ShaderMaterial({
+                    uniforms: uniforms,
+                    vertexShader: document.getElementById( 'vertexShader' ).textContent,
+                    fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+                });
+
+                /*
+                // create a sphere
+                var sphereGeometry = new THREE.SphereGeometry(5, 20, 20);
+
+                sphere = new THREE.Mesh(sphereGeometry, material);
+                sphere.material.texture = texture;
+
+                // position the sphere
+                sphere.position.x = 0;
+                sphere.position.y = 0;
+                sphere.position.z = 0;
+
+                // add the sphere to the scene
+                scene.add(sphere);
+                */
+
+                // cube geometry
+                var boxGeometry = new THREE.BoxGeometry( 10, 10, 10 );
+                box = new THREE.Mesh( boxGeometry, material );
+                box.position.x = 0;
+                box.position.y = 0;
+                box.position.z = 0;
+                scene.add( box );
+
+                // light
+                lights = {};
+                lights.directional = new THREE.DirectionalLight(0xffffff, 10.0);
+                lights.directional.position.set(-3,10,-3);
+                lights.directionalHelper = new THREE.DirectionalLightHelper(lights.directional, 1.0);
+
+                lights.point = new THREE.PointLight(0xff0000, 1, 20.0);
+                lights.point.position.set(10,10,0);
+
+                lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0);
+
+                lights.spot = new THREE.SpotLight(0x00ff00, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
+                lights.spot.position.set(-10, 10, 0);
+                lights.spotHelper = new THREE.SpotLightHelper(lights.spot, 1.0);
+                
+                // adding lights and lighthelper to the scene
+                scene.add(lights.directional);
+                scene.add(lights.directionalHelper);
+                scene.add(lights.point);
+                scene.add(lights.pointHelper);
+                scene.add(lights.spot);
+                scene.add(lights.spotHelper);
+
+
+                // normal line
+                var geometry = new THREE.BufferGeometry();
+                geometry.setFromPoints( [ new THREE.Vector3(), new THREE.Vector3() ] );
+                line = new THREE.Line( geometry, new THREE.LineBasicMaterial( { linewidth: 0.1 } ) );
+                line.visible = false;
+                scene.add( line );
+
+                // Listening
+
+                raycaster = new THREE.Raycaster();
+
+                mouseHelper = new THREE.Mesh( new THREE.BoxBufferGeometry( 0.1, 0.1, 2 ), new THREE.MeshNormalMaterial() );
+                mouseHelper.visible = false;
+                scene.add( mouseHelper );
+
+                window.addEventListener( 'resize', onWindowResize, false );
+
+                var moved = false;
+
+                controls.addEventListener( 'change', function() {
+
+                    moved = true;
+
+                } );
+
+                window.addEventListener( 'mousedown', function () {
+
+                    moved = false;
+
+                }, false );
+
+                window.addEventListener( 'mouseup', function() {
+
+                    checkIntersection();
+                    
+                    if ( ! moved && intersection.intersects ) changeColor();
+
+                } );
+
+                window.addEventListener( 'mousemove', onTouchMove );
+                window.addEventListener( 'touchmove', onTouchMove );
+
+                function onTouchMove( event ) {
+
+                    var x, y;
+
+                    if ( event.changedTouches ) {
+
+                        x = event.changedTouches[ 0 ].pageX;
+                        y = event.changedTouches[ 0 ].pageY;
+
+                    } else {
+
+                        x = event.clientX;
+                        y = event.clientY;
+
+                    }
+
+                    mouse.x = ( x / window.innerWidth ) * 2 - 1;
+                    mouse.y = - ( y / window.innerHeight ) * 2 + 1;
+
+                    //checkIntersection();
+
+                }
+
+                function checkIntersection() {
+
+                    if ( ! sphere ) return;
+
+                    raycaster.setFromCamera( mouse, camera );
+
+                    var intersects = raycaster.intersectObjects( [ sphere ] );
+
+                    if ( intersects.length > 0 ) {
+
+                        var p = intersects[ 0 ].point;
+                        mouseHelper.position.copy( p );
+                        intersection.point.copy( p );
+
+                        var n = intersects[ 0 ].face.normal.clone();
+                        n.transformDirection( sphere.matrixWorld );
+                        n.multiplyScalar( 10 );
+                        n.add( intersects[ 0 ].point );
+
+                        intersection.normal.copy( intersects[ 0 ].face.normal );
+                        mouseHelper.lookAt( n );
+
+                        var positions = line.geometry.attributes.position;
+                        positions.setXYZ( 0, p.x, p.y, p.z );
+                        positions.setXYZ( 1, n.x, n.y, n.z );
+                        positions.needsUpdate = true;
+
+                        line.visible = true;
+
+                        //console.log(p);
+                        getUV(p)
+
+
+                        intersection.intersects = true;
+
+                    } else {
+
+                        line.visible = false;
+
+                        intersection.intersects = false;
+
+                    }
+
+                }
+
+                function getUV(position) {
+                    
+                    var x = position.x;
+                    var y = position.y;
+                    var z = position.z;
+
+                    var sphere_center = sphere.position;
+
+                    var n = new THREE.Vector3(x-sphere_center.x, y-sphere_center.y, z-sphere_center.z);
+                    n = n.normalize();
+
+                    var u = Math.atan2(n.x, n.z) / (2*Math.PI) + 0.5;
+                    var v = 0.5 - Math.asin(n.y)/Math.PI;
+
+                    console.log('normal:'+n);
+
+                    console.log('u:'+u);
+                    console.log('v:'+v);
+                }
+
+                setupGui();
+
+            }
+
+            function setupGui() {
+                    
+                effectController = {
+                    metallic: uniforms.metallic.value,
+                    roughness: uniforms.roughness.value,
+                    albedo: 0xff00ff,
+                    drawLight: false
+                };
+
+                var gui = new dat.GUI();
+
+                //gui.addColor(params, 'color');
+
+                gui.add(effectController, "drawLight");
+                //gui.addColor(effectController, 'albedo');
+                //gui.add(effectController, "metallic", 0.0, 1.0, 0.01);
+                //gui.add(effectController, "roughness", 0.0, 1.0, 0.01);
+
+                gui.open();
+            }
+
+            function changeColor() {
+
+                //console.log(params.color);
+
+                //sphere.material = new THREE.MeshLambertMaterial({color: 0x771111});
+                //sphere.material = new THREE.MeshLambertMaterial({color: params.color});
+            }
+
+            function onWindowResize() {
+
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+
+                renderer.setSize( window.innerWidth, window.innerHeight );
+
+            }
+
+            function animate() {
+
+                requestAnimationFrame( animate );
+
+                controls.update(); // only required if controls.enableDamping = true, or if controls.autoRotate = true
+
+                stats.update();
+
+                render();
+
+            }
+
+            function render() {
+
+                stats.update();
+
+                camera.updateMatrixWorld();
+                camera.matrixWorldInverse.getInverse(camera.matrixWorld);
+                var viewMatrix = camera.matrixWorldInverse;
+
+                uniforms.metallic.value = effectController.metallic;
+                uniforms.roughness.value = effectController.roughness;
+                uniforms.albedo.value.setHex(effectController.albedo);
+
+                uniforms.numDirectionalLights.value = 1;
+                uniforms.directionalLights.value[0].direction.copy(lights.directional.position).normalize().transformDirection(viewMatrix);
+                uniforms.directionalLights.value[0].color.copy(lights.directional.color);
+
+                uniforms.numPointLights.value = 1;
+                uniforms.pointLights.value[0].position.copy(lights.point.position).applyMatrix4(viewMatrix);
+                uniforms.pointLights.value[0].color.copy(lights.point.color);
+                uniforms.pointLights.value[0].distance = lights.point.distance;
+                uniforms.pointLights.value[0].decay = lights.point.decay;
+
+                uniforms.numSpotLights.value = 1;
+                uniforms.spotLights.value[0].position.copy(lights.spot.position).applyMatrix4(viewMatrix);
+                uniforms.spotLights.value[0].direction.copy(lights.spot.position).normalize().transformDirection(viewMatrix);
+                uniforms.spotLights.value[0].color.copy(lights.spot.color);
+                uniforms.spotLights.value[0].distance = lights.spot.distance;
+                uniforms.spotLights.value[0].decay = lights.spot.decay;
+                uniforms.spotLights.value[0].coneCos = Math.cos(lights.spot.angle);
+                uniforms.spotLights.value[0].penumbraCos = Math.cos(lights.spot.angle * (1.0 - lights.spot.penumbra));
+
+                lights.directionalHelper.visible = effectController.drawLight;
+                lights.pointHelper.visible = effectController.drawLight;
+                lights.spotHelper.visible = effectController.drawLight;
+
+                uniforms.diffuseType.value = 8;
+
+                renderer.render(scene, camera);
+
+                scene.overrideMaterial = null;
+            }
+
+        </script>
+
+    </body>
+</html>

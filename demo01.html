@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>three.js raycast - texture</title>
+    <title>demo 01</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
@@ -334,6 +334,10 @@
 
               float dY = bl + 2.0*b + br -tl - 2.0*t - tr;
 
+              
+              dY = 0.1 * dY;
+              dX = 0.1 * dX;
+
               // Build the normalized normal
               vec3 N = normalize(vec3(dX, 1.0 / normalStrength, dY));
 
@@ -382,6 +386,7 @@
               */
               
               // spot light
+              /*
               for (int i=0; i<LIGHT_MAX; ++i) {
                 if (i >= numSpotLights) break;
                 getSpotDirectLightIrradiance(spotLights[i], geometry, directLight);
@@ -389,6 +394,7 @@
                   RE_Direct(directLight, geometry, material, reflectedLight);
                 }
               }
+              */
               
               // directional light
               for (int i=0; i<LIGHT_MAX; ++i) {
@@ -400,7 +406,8 @@
               
               //vec3 outgoingLight = emissive + reflectedLight.directDiffuse + reflectedLight.directSpecular;
 
-              vec3 outgoingLight = emissive + reflectedLight.directDiffuse;
+              //vec3 outgoingLight = emissive + reflectedLight.directDiffuse;
+              vec3 outgoingLight = reflectedLight.directDiffuse;
               
               gl_FragColor = vec4(outgoingLight, opacity);
               //gl_FragColor = texture2D(roughnessMap, vUv);
@@ -457,7 +464,7 @@
 
       var params = {
 
-        color: "#000000",
+        color: "#1fdc35",
         lineWidth: 5,
 
       };
@@ -641,9 +648,9 @@
         scene_01.add(lights.directional);
         scene_01.add(lights.directionalHelper);
         scene_01.add(lights.point);
-        scene_01.add(lights.pointHelper);
+        //scene_01.add(lights.pointHelper);
         scene_01.add(lights.spot);
-        scene_01.add(lights.spotHelper);
+        //scene_01.add(lights.spotHelper);
 
         window.addEventListener( 'resize', onWindowResize, false );
 

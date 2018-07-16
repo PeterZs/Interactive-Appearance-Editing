@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>demo 02</title>
+    <title>demo 04</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
@@ -334,6 +334,9 @@
 
               float dY = bl + 2.0*b + br -tl - 2.0*t - tr;
 
+              
+              dY = 0.1 * dY;
+              dX = 0.1 * dX;
 
               // Build the normalized normal
               vec3 N = normalize(vec3(dX, 1.0 / normalStrength, dY));
@@ -414,6 +417,9 @@
 
   </head>
   <body>
+    <div id="paint">
+      <canvas id="canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0"></canvas>
+    </div>
     <div id="container"></div>
     <div id="container_01"></div>
 
@@ -434,11 +440,11 @@
       var width = window.innerWidth;
       var height = window.innerHeight;
 
-      var canvas, ctx, ctx_01, ctx_02;
+      var canvas, ctx;
 
       var bunny;
 
-      var texture;
+      var diffuse_canvas;
 
       var container;
       var container_01;
@@ -453,16 +459,13 @@
       var camera_01, scene_01, renderer_01;
       var material;
 
-      var clickX = new Array();
-      var clickY = new Array();
-      var clickDrag = new Array();
-
       var isPainting;
 
       var params = {
 
         color: "#1fdc35",
         lineWidth: 5,
+        drawLight: false
 
       };
 
@@ -472,31 +475,15 @@
       var mouse = new THREE.Vector2();
       var onClickPosition = new THREE.Vector2();
 
-      loadShaders();
+      init();
+      initRenderingScene();
+      loadingModels();
 
-      function loadShaders() {
+      initListening();
 
-          loadFiles([
-            'shaders/pbr_vert_test.glsl',
-            'shaders/pbr_frag_test.glsl'
-          ], function(shaders) {
+      setupGui();
 
-            init();
-            initRenderingScene(shaders);
-            loadingModels();
-
-            initListening();
-
-            setupGui();
-
-            animate();       
-
-          }, function(url) {
-              
-              alert('Failed to download "' + url + '"');
-          
-          });
-      }
+      animate();       
 
       function init() {
 
@@ -525,18 +512,9 @@
         // controls
         controls = new THREE.OrbitControls( camera, renderer.domElement );
 
-        // Height map.
-        canvas = document.createElement( 'canvas' );
+        // ********************** canvas **********************
+        canvas = document.getElementById( 'canvas' );
         ctx = canvas.getContext( '2d' );
-
-        canvas.width = size;
-        canvas.height = size;
-
-        canvas.style = "border:1px solid #ffffff;"
-
-        canvas.style.position = 'fixed';
-        canvas.style.left = 0;
-        canvas.style.top = 0;
 
         base_image = new Image();
         base_image.src = 'assets/textures/brick_diffuse.jpg';
@@ -544,12 +522,12 @@
             ctx.drawImage(base_image, 0, 0, 256, 256);
         }
 
-        texture = new THREE.Texture( canvas );
-        container.appendChild( canvas );
+        diffuse_canvas = new THREE.Texture( canvas );
+        
 
       }
 
-      function initRenderingScene(shaders){
+      function initRenderingScene(){
 
         container_01 = document.getElementById( "container_01" );
 
@@ -584,7 +562,7 @@
             roughness: {value: 0.0},
             albedo: {value: new THREE.Color(0xffff00)},
             roughnessMap: { type: "t", value: roughnessMap },
-            diffuseMap: { type: "t", value: texture },
+            diffuseMap: { type: "t", value: diffuse_canvas },
             normalMap: { type: "t", value: normalMap },
             bumpMap: { type: "t", value: bumpMap },
             diffuseType: {value:0},
@@ -679,7 +657,7 @@
         var loader = new THREE.OBJLoader( manager );
         loader.load( 'assets/models/obj/bunny_uv_01.obj', function ( object ) {
 
-            var sMaterial = new THREE.MeshBasicMaterial( { map: texture } );
+            var sMaterial = new THREE.MeshBasicMaterial( { map: diffuse_canvas } );
             var sGeometry = object.children[0].geometry;
             console.log(sGeometry);
             var uvs = sGeometry.attributes.uv.array;
@@ -736,6 +714,7 @@
         if ( intersects.length > 0 && intersects[ 0 ].uv ) {
 
           controls.enabled = false;
+          isPainting = true;
 
           var uv = intersects[ 0 ].uv;
           intersects[ 0 ].object.material.map.transformUv( uv );
@@ -746,9 +725,12 @@
           x = Math.round(x * 255);
           y = Math.round(y * 255);
 
-          isPainting = true;
-          addClick(x, y);
-          redraw(ctx);
+          // painting
+          ctx.strokeStyle = params.color;
+          ctx.lineWidth = params.lineWidth;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+
         }
           
       }
@@ -775,6 +757,7 @@
           if ( intersects.length > 0 && intersects[ 0 ].uv ) {
 
             controls.enabled = false;
+            isPainting = true;
 
             var uv = intersects[ 0 ].uv;
             intersects[ 0 ].object.material.map.transformUv( uv );
@@ -785,41 +768,18 @@
             x = Math.round(x * 255);
             y = Math.round(y * 255);
 
-            addClick(x, y, true);
-            redraw(ctx);
+            onPaint(x,y);
+
           }
 
         }
 
       }
 
-      function addClick(x, y, dragging)
-      {
-        clickX.push(x);
-        clickY.push(y);
-        clickDrag.push(dragging);
-      }
-
-      function redraw(ctx_temp){
-
-        var current_color = params.color;
-        
-        ctx_temp.strokeStyle = current_color;
-        ctx_temp.lineJoin = "round";
-        ctx_temp.lineWidth = params.lineWidth;
-            
-        for(var i=0; i < clickX.length; i++) {    
-          ctx_temp.beginPath();
-          if(clickDrag[i] && i){
-            ctx_temp.moveTo(clickX[i-1], clickY[i-1]);
-           }else{
-             ctx_temp.moveTo(clickX[i]-1, clickY[i]);
-           }
-           ctx_temp.lineTo(clickX[i], clickY[i]);
-           ctx_temp.closePath();
-           ctx_temp.stroke();
-        }
-      }
+      var onPaint = function(x,y) {
+          ctx.lineTo(x, y);
+          ctx.stroke();
+      };
 
       var getMousePosition = function ( dom, x, y ) {
 
@@ -842,32 +802,32 @@
       function onKeyDown ( event ) {
 
 
-        base_image = new Image();
+        // base_image = new Image();
 
-        switch ( event.keyCode ) {
+        // switch ( event.keyCode ) {
 
-          case 49: // 1
-            console.log("1");
-            base_image.src = 'assets/textures/brick_diffuse.jpg';
-          break;
+        //   case 49: // 1
+        //     console.log("1");
+        //     base_image.src = 'assets/textures/brick_diffuse.jpg';
+        //   break;
 
-          case 50: // 2
-            console.log("2");
-            base_image.src = 'assets/textures/brick_roughness.jpg';
-          break;
+        //   case 50: // 2
+        //     console.log("2");
+        //     base_image.src = 'assets/textures/brick_roughness.jpg';
+        //   break;
 
-          case 51: // 3
-            console.log("3");
-            base_image.src = 'assets/textures/brick_bump.jpg';
-          break;
+        //   case 51: // 3
+        //     console.log("3");
+        //     base_image.src = 'assets/textures/brick_bump.jpg';
+        //   break;
 
-        }
+        // }
 
-        ctx.drawImage(base_image, 0, 0, 256, 256);
-        texture = new THREE.Texture( canvas );
+        // ctx.drawImage(base_image, 0, 0, 256, 256);
+        // texture = new THREE.Texture( canvas );
 
-        bunny.material.needsUpdate = true;
-        bunny.material.map = texture;
+        // bunny.material.needsUpdate = true;
+        // bunny.material.map = texture;
 
 
 
@@ -878,26 +838,18 @@
       }
 
       function setupGui() {
-              
-          effectController = {
-              metallic: uniforms.metallic.value,
-              roughness: uniforms.roughness.value,
-              albedo: 0xff00ff,
-              drawLight: false
-          };
 
           var gui = new dat.GUI();
 
           gui.addColor(params, 'color');
           gui.add(params, "lineWidth", 1.0, 10.0, 0.01);
-          gui.add(effectController, "drawLight");
 
           gui.open();
       }
 
       function animate() {
 
-          texture.needsUpdate = true;
+          diffuse_canvas.needsUpdate = true;
           
 
           requestAnimationFrame( animate );
@@ -917,9 +869,9 @@
           camera_01.matrixWorldInverse.getInverse(camera_01.matrixWorld);
           var viewMatrix = camera_01.matrixWorldInverse;
 
-          uniforms.metallic.value = effectController.metallic;
-          uniforms.roughness.value = effectController.roughness;
-          uniforms.albedo.value.setHex(effectController.albedo);
+          // uniforms.metallic.value = effectController.metallic;
+          // uniforms.roughness.value = effectController.roughness;
+          // uniforms.albedo.value.setHex(effectController.albedo);
 
           uniforms.numDirectionalLights.value = 1;
           uniforms.directionalLights.value[0].direction.copy(lights.directional.position).normalize().transformDirection(viewMatrix);
@@ -940,9 +892,9 @@
           uniforms.spotLights.value[0].coneCos = Math.cos(lights.spot.angle);
           uniforms.spotLights.value[0].penumbraCos = Math.cos(lights.spot.angle * (1.0 - lights.spot.penumbra));
 
-          lights.directionalHelper.visible = effectController.drawLight;
-          lights.pointHelper.visible = effectController.drawLight;
-          lights.spotHelper.visible = effectController.drawLight;
+          lights.directionalHelper.visible = params.drawLight;
+          lights.pointHelper.visible = params.drawLight;
+          lights.spotHelper.visible = params.drawLight;
 
           uniforms.diffuseType.value = 8;
 

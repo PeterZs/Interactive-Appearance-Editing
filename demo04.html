@@ -418,7 +418,8 @@
   </head>
   <body>
     <div id="paint">
-      <canvas id="canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0"></canvas>
+      <canvas id="diffuse_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:0"></canvas>
+      <canvas id="bump_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:-1"></canvas>
     </div>
     <div id="container"></div>
     <div id="container_01"></div>
@@ -440,11 +441,14 @@
       var width = window.innerWidth;
       var height = window.innerHeight;
 
-      var canvas, ctx;
+      var canvas_01, ctx_diffuse;
+      var canvas_02, ctx_bump;
+      var canvas_type, ctx;
 
       var bunny;
 
-      var diffuse_canvas;
+      var diffuse_texture;
+      var bump_texture;
 
       var container;
       var container_01;
@@ -469,12 +473,11 @@
 
       };
 
-      //let brushCanvas, brushCtx;
-
       var raycaster = new THREE.Raycaster();
       var mouse = new THREE.Vector2();
       var onClickPosition = new THREE.Vector2();
 
+      initCanvas();
       init();
       initRenderingScene();
       loadingModels();
@@ -483,10 +486,43 @@
 
       setupGui();
 
-      animate();       
+      animate();  
+
+      function initCanvas(){
+
+        canvas_type = 1;
+
+        // ********************** diffuse canvas **********************
+        canvas_01 = document.getElementById( 'diffuse_canvas' );
+        ctx_diffuse = canvas_01.getContext( '2d' );
+
+        diffuse_image = new Image();
+        diffuse_image.src = 'assets/textures/brick_diffuse.jpg';
+        diffuse_image.onload = function(){
+            ctx_diffuse.drawImage(diffuse_image, 0, 0, 256, 256);
+        }
+
+        diffuse_texture = new THREE.Texture( canvas_01 );
+
+        // ********************** bump canvas **********************
+
+        canvas_02 = document.getElementById( 'bump_canvas' );
+        ctx_bump = canvas_02.getContext( '2d' );
+
+        bump_image = new Image();
+        bump_image.src = 'assets/textures/brick_bump.jpg';
+        bump_image.onload = function(){
+            ctx_bump.drawImage(bump_image, 0, 0, 256, 256);
+        }
+
+        bump_texture = new THREE.Texture( canvas_02 );
+
+
+      }     
 
       function init() {
 
+        // three.js building a scene
         container = document.getElementById( "container" );
 
         scene = new THREE.Scene();
@@ -496,9 +532,7 @@
         scene.add(axes);
 
         camera = new THREE.PerspectiveCamera( 45, width / (height/2), 1, 1000 );
-        camera.position.x = 0;
-        camera.position.y = 0;
-        camera.position.z = 3;
+        camera.position.set(0, 0, 3);
         camera.lookAt( scene.position );
 
         // cameraPerspectiveHelper = new THREE.CameraHelper( camera );
@@ -511,19 +545,6 @@
 
         // controls
         controls = new THREE.OrbitControls( camera, renderer.domElement );
-
-        // ********************** canvas **********************
-        canvas = document.getElementById( 'canvas' );
-        ctx = canvas.getContext( '2d' );
-
-        base_image = new Image();
-        base_image.src = 'assets/textures/brick_diffuse.jpg';
-        base_image.onload = function(){
-            ctx.drawImage(base_image, 0, 0, 256, 256);
-        }
-
-        diffuse_canvas = new THREE.Texture( canvas );
-        
 
       }
 
@@ -562,9 +583,9 @@
             roughness: {value: 0.0},
             albedo: {value: new THREE.Color(0xffff00)},
             roughnessMap: { type: "t", value: roughnessMap },
-            diffuseMap: { type: "t", value: diffuse_canvas },
+            diffuseMap: { type: "t", value: diffuse_texture },
             normalMap: { type: "t", value: normalMap },
-            bumpMap: { type: "t", value: bumpMap },
+            bumpMap: { type: "t", value: bump_texture },
             diffuseType: {value:0},
             pointLights: {value:[]},
             spotLights: {value:[]},
@@ -657,7 +678,7 @@
         var loader = new THREE.OBJLoader( manager );
         loader.load( 'assets/models/obj/bunny_uv_01.obj', function ( object ) {
 
-            var sMaterial = new THREE.MeshBasicMaterial( { map: diffuse_canvas } );
+            var sMaterial = new THREE.MeshBasicMaterial( { map: diffuse_texture } );
             var sGeometry = object.children[0].geometry;
             console.log(sGeometry);
             var uvs = sGeometry.attributes.uv.array;
@@ -726,10 +747,7 @@
           y = Math.round(y * 255);
 
           // painting
-          ctx.strokeStyle = params.color;
-          ctx.lineWidth = params.lineWidth;
-          ctx.beginPath();
-          ctx.moveTo(x, y);
+          startPaint();
 
         }
           
@@ -776,9 +794,37 @@
 
       }
 
+      var startPaint = function(x,y) {
+
+          if(canvas_type == 1){
+            ctx_diffuse.strokeStyle = params.color;
+            ctx_diffuse.lineWidth = params.lineWidth;
+            ctx_diffuse.beginPath();
+            ctx_diffuse.moveTo(x, y);
+          }
+
+          if (canvas_type == 2) {
+            ctx_bump.strokeStyle = params.color;
+            ctx_bump.lineWidth = params.lineWidth;
+            ctx_bump.beginPath();
+            ctx_bump.moveTo(x, y);
+          }
+
+
+      };
+
       var onPaint = function(x,y) {
-          ctx.lineTo(x, y);
-          ctx.stroke();
+
+          if(canvas_type == 1){
+            ctx_diffuse.lineTo(x, y);
+            ctx_diffuse.stroke();
+          }
+
+          if (canvas_type == 2) {
+            ctx_bump.lineTo(x, y);
+            ctx_bump.stroke();
+          }
+
       };
 
       var getMousePosition = function ( dom, x, y ) {
@@ -801,35 +847,30 @@
 
       function onKeyDown ( event ) {
 
+        bunny.material.needsUpdate = true;
 
-        // base_image = new Image();
+        switch ( event.keyCode ) {
 
-        // switch ( event.keyCode ) {
+          case 49: // 1
+            canvas_type = 1;
+            canvas_01.style.zIndex = 1;
+            canvas_02.style.zIndex = 0;
+            bunny.material.map = diffuse_texture;
+          break;
 
-        //   case 49: // 1
-        //     console.log("1");
-        //     base_image.src = 'assets/textures/brick_diffuse.jpg';
-        //   break;
+          case 50: // 2
+            canvas_type = 2;
+            canvas_02.style.zIndex = 1;
+            canvas_01.style.zIndex = 0;
+            bunny.material.map = bump_texture;
+          break;
 
-        //   case 50: // 2
-        //     console.log("2");
-        //     base_image.src = 'assets/textures/brick_roughness.jpg';
-        //   break;
+          case 51: // 3
+            console.log("3");
 
-        //   case 51: // 3
-        //     console.log("3");
-        //     base_image.src = 'assets/textures/brick_bump.jpg';
-        //   break;
+          break;
 
-        // }
-
-        // ctx.drawImage(base_image, 0, 0, 256, 256);
-        // texture = new THREE.Texture( canvas );
-
-        // bunny.material.needsUpdate = true;
-        // bunny.material.map = texture;
-
-
+        }
 
       }
 
@@ -849,7 +890,8 @@
 
       function animate() {
 
-          diffuse_canvas.needsUpdate = true;
+          diffuse_texture.needsUpdate = true;
+          bump_texture.needsUpdate = true;
           
 
           requestAnimationFrame( animate );

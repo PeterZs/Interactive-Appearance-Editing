@@ -1,0 +1,139 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0px;
+        padding: 0px;
+      }
+    </style>
+    <script src="js/libs/dat.gui.min.js"></script>
+  </head>
+
+  <body>
+  	<div id="paint">
+  		<canvas id="myCanvas" width="300" height="300" style="border:1px solid #000000;"></canvas>
+	  </div>
+    <script>
+
+      var type = 1;
+
+      var params = {
+        color: "#ffae23",
+      };
+
+      var canvas = document.getElementById('myCanvas');
+      var ctx = canvas.getContext('2d');
+ 
+      var painting = document.getElementById('paint');
+      var paint_style = getComputedStyle(painting);
+
+      var mouse = {x: 0, y: 0};
+ 
+      canvas.addEventListener('mousemove', function(e) {
+        mouse.x = e.pageX - this.offsetLeft;
+        mouse.y = e.pageY - this.offsetTop;
+      }, false);
+
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = params.color;
+
+      var background = new Image();
+      background.src = "assets/textures/brick_diffuse.jpg";
+
+      background.onload = function(){
+        ctx.drawImage(background,0,0);   
+      }
+
+ 
+      canvas.addEventListener('mousedown', function(e) {
+
+          if(type == 1){
+            ctx.strokeStyle = params.color;
+            ctx.beginPath();
+            ctx.moveTo(mouse.x, mouse.y);
+          }
+
+          if(type == 2){
+
+            console.log('start');
+            var size = 30;
+            var xx = mouse.x - size/2;
+            var yy = mouse.y - size/2;
+            
+
+            var imageData = ctx.getImageData(xx, yy, size, size);
+            var filtered = ImageFilters.StackBlur(imageData, 1.0);
+            ctx.putImageData(filtered, xx, yy);
+
+            console.log('end');
+          }
+       
+          canvas.addEventListener('mousemove', onPaint, false);
+      }, false);
+ 
+      canvas.addEventListener('mouseup', function() {
+          canvas.removeEventListener('mousemove', onPaint, false);
+      }, false);
+
+      document.addEventListener( 'keydown', onKeyDown, false );
+ 
+      var onPaint = function() {
+        if(type == 1){
+          ctx.lineTo(mouse.x, mouse.y);
+          ctx.stroke();
+        }
+        if(type == 2){
+            var size = 30;
+            var xx = mouse.x - size/2;
+            var yy = mouse.y - size/2;
+            
+
+            var imageData = ctx.getImageData(xx, yy, size, size);
+            var filtered = ImageFilters.StackBlur(imageData, 1.0);
+            ctx.putImageData(filtered, xx, yy);
+        }
+      };
+
+      setupGui();
+
+      function setupGui() {
+              
+          var gui = new dat.GUI();
+
+          gui.addColor(params, 'color');
+
+          gui.open();
+      }
+
+      function onKeyDown ( event ) {
+
+        switch ( event.keyCode ) {
+
+          case 49: // 1
+            console.log('1');
+            type = 1;
+          break;
+
+          case 50: // 2
+            console.log('2');
+            type = 2;
+
+          break;
+
+          case 51: // 3
+
+          break;
+
+        }
+
+      }
+
+    </script>
+
+    <script src="js_yuan/imagefilters.js"></script>
+    <!-- <script src="js/tools.js"></script> -->
+  </body>
+</html>            

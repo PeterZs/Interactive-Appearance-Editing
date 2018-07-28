@@ -494,6 +494,9 @@
                 uniforms.spotLights.value[0].coneCos = Math.cos(lights.spot.angle);
                 uniforms.spotLights.value[0].penumbraCos = Math.cos(lights.spot.angle * (1.0 - lights.spot.penumbra));
 
+                console.log("1111");
+                console.log(uniforms.spotLights.value[0].position);
+
                 lights.directionalHelper.visible = effectController.drawLight;
                 lights.pointHelper.visible = effectController.drawLight;
                 lights.spotHelper.visible = effectController.drawLight;

@@ -47,6 +47,27 @@
         ctx.drawImage(background,0,0);   
       }
 
+      function blur(x, y, radius, strength){
+
+        var xx = x - radius/2;
+        var yy = y - radius/2;
+        
+        var imageData = ctx.getImageData(xx, yy, radius, radius);
+        var filtered = ImageFilters.GaussianBlur(imageData, strength);
+        ctx.putImageData(filtered, xx, yy);
+
+      }
+
+      function sharpen(x, y, radius, strength){
+
+        var xx = x - radius/2;
+        var yy = y - radius/2;
+        
+        var imageData = ctx.getImageData(xx, yy, radius, radius);
+        var filtered = ImageFilters.Sharpen(imageData, strength);
+        ctx.putImageData(filtered, xx, yy);
+
+      }
  
       canvas.addEventListener('mousedown', function(e) {
 
@@ -57,18 +78,11 @@
           }
 
           if(type == 2){
+            blur(mouse.x,mouse.y,60,10);
+          }
 
-            console.log('start');
-            var size = 30;
-            var xx = mouse.x - size/2;
-            var yy = mouse.y - size/2;
-            
-
-            var imageData = ctx.getImageData(xx, yy, size, size);
-            var filtered = ImageFilters.StackBlur(imageData, 1.0);
-            ctx.putImageData(filtered, xx, yy);
-
-            console.log('end');
+          if(type == 3){
+            sharpen(mouse.x,mouse.y,60,1);
           }
        
           canvas.addEventListener('mousemove', onPaint, false);
@@ -86,14 +100,10 @@
           ctx.stroke();
         }
         if(type == 2){
-            var size = 30;
-            var xx = mouse.x - size/2;
-            var yy = mouse.y - size/2;
-            
-
-            var imageData = ctx.getImageData(xx, yy, size, size);
-            var filtered = ImageFilters.StackBlur(imageData, 1.0);
-            ctx.putImageData(filtered, xx, yy);
+          blur(mouse.x,mouse.y,60,10);
+        }
+        if(type == 3){
+          sharpen(mouse.x,mouse.y,60,1);
         }
       };
 
@@ -124,6 +134,7 @@
           break;
 
           case 51: // 3
+            type = 3;
 
           break;
 

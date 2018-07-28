@@ -195,6 +195,8 @@
               float dotLH = saturate(dot(L,H));
               float dotLV = saturate(dot(L,V));
               float a = roughnessFactor * roughnessFactor;
+
+              return dotNL * diffuseColor;
               
               if (diffuseType >= 9) {
                 return GGXApproxDiffuse(diffuseColor, dotNL, dotNV, dotLH, dotVH, dotLV, roughnessFactor, a);

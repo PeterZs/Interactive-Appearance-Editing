@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>Demo</title>
+    <title>demo 04</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
@@ -39,229 +39,146 @@
       }
     </style>
 
-    <script id="vertexShader" type="x-shader/x-vertex">
+        <script id="vertexShader" type="x-shader/x-vertex">
+            varying vec3 vViewPosition;
+            varying vec3 vNormal;
 
-        #define LIGHT_MAX 4
-        
-        varying vec3 vNormal;
-        varying vec3 vPosition;
-        varying vec2 vUv;
+            uniform sampler2D roughnessMap;
+            uniform sampler2D diffuseMap;
+            varying vec2 vUv;
+            
+            void main() {
 
-        varying vec3 vViewDir;
-        varying vec3 vLightDir;
-        varying float vLightDistance2;
+              vUv = uv;
+              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
 
-        uniform sampler2D uBumpMap;
-        uniform sampler2D uNormalMap;
+              gl_Position = projectionMatrix * mvPosition;
 
-        uniform float uScale;
+              vViewPosition = -mvPosition.xyz;
 
-        struct PointLight {
-            vec3 position;
-            vec3 color;
-        };
+              vNormal = normalMatrix * normal;
 
-        uniform PointLight pointLights[LIGHT_MAX];
+            }        
+        </script>
 
-        vec3 computeNormal(){
+        <script id="fragmentShader" type="x-shader/x-fragment">
+            varying vec3 vViewPosition;
+            varying vec3 vNormal;
 
-            float texelSize;
-            float textureSize;
+            varying vec2 vUv;
 
-            textureSize = 1024.0;
-            texelSize = 1.0 / textureSize;
+            // uniforms
+            uniform float metallic;
+            uniform vec3 albedo;
+            uniform int diffuseType;
 
-            float mu = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
-            float pv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
-            float mv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
-            float pu = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
+            uniform sampler2D roughnessMap;
+            uniform sampler2D diffuseMap;
+            uniform sampler2D normalMap;
+            uniform sampler2D bumpMap;
 
-            float du = mu - pu;
-            float dv = mv - pv;
+            // defines
+            #define PI 3.14159265359
+            #define PI2 6.28318530718
+            #define RECIPROCAL_PI 0.31830988618
+            #define RECIPROCAL_PI2 0.15915494
+            #define LOG2 1.442695
+            #define EPSILON 1e-6
 
-            vec3 normal = normalize(vec3(du, dv, 1.0/uScale));
+            // Convert bump map to normal map
 
-            return normal;
+            float textureSize = 1024.0;
+            float texelSize; //size of one texel;
+            float normalStrength = 20.0;
+             
+            vec3 ComputeNormals(){
 
-        }
+              texelSize =  1.0 / textureSize ;
 
-
-        void main()
-        {
-            vUv = uv;
-
-            vNormal = computeNormal();
-
-            vPosition = vec3(modelViewMatrix * vec4(position, 1.0));
-
-            vec3 lightPosition = pointLights[0].position;
-
-            vViewDir = normalize(-vPosition.xyz);
-            vLightDir = lightPosition - vPosition.xyz;
-            vLightDistance2 = length(vLightDir);
-            vLightDir /= vLightDistance2;
-            vLightDistance2 *= vLightDistance2;
-
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-           
-        } 
-
-  
-    </script>
-
-    <script id="fragmentShader" type="x-shader/x-fragment">  
-
-        #define PI 3.14159265359  
-        #define LIGHT_MAX 4
-
-        varying vec3 vNormal;
-        varying vec3 vPosition;
-
-        varying vec3 vViewDir;
-        varying vec3 vLightDir;
-        varying float vLightDistance2;
-
-        varying vec2 vUv;
-
-        uniform sampler2D uDiffuseMap;
-        uniform sampler2D uRoughnessMap;
-        uniform sampler2D uNormalMap;
-        uniform sampler2D uBumpMap;
-        
-
-        uniform float uRoughness;
-        uniform float uAmbinetCoefficient;
-
-        struct PointLight {
-            vec3 position;
-            vec3 color;
-        };
-
-        uniform PointLight pointLights[LIGHT_MAX];
-
-        float F0 = 0.8;
-        //float roughness = 0.9;
-        float k = 0.2;
-        //vec3 lightColor = vec3(1, 1, 1);
+              float tl = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1, -1)).x);   // top left
+              float  l = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
+              float bl = abs(texture2D (bumpMap, vUv + texelSize * vec2(-1,  1)).x);   // bottom left
+              float  t = abs(texture2D (bumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
+              float  b = abs(texture2D (bumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
+              float tr = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1, -1)).x);   // top right
+              float  r = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
+              float br = abs(texture2D (bumpMap, vUv + texelSize * vec2( 1,  1)).x);   // bottom right
 
 
-        vec3 BRDF(vec3 materialDiffuseColor, vec3 normal, vec3 lightDir, vec3 viewDir)
-        {
-            vec3 H = normalize(lightDir + viewDir);
-            float NdotL = max(0.0, dot(normal, lightDir));
+              // Compute dx using Sobel:
+              //           -1 0 1 
+              //           -2 0 2
+              //           -1 0 1
 
-            float Rd = 0.0;
+              float dX = tr + 2.0*r + br -tl - 2.0*l - bl;
 
-            if (NdotL > 0.0) 
-            {
+              // Compute dy using Sobel:
+              //           -1 -2 -1 
+              //            0  0  0
+              //            1  2  1
 
-                float NdotH = max(0.0, dot(normal, H));
-                float NdotV = max(0.0, dot(normal, viewDir));
-                float VdotH = max(0.0, dot(lightDir, H));
-                float LdotV = max(0.0, dot(lightDir, viewDir));
+              float dY = bl + 2.0*b + br -tl - 2.0*t - tr;
 
-                float a = uRoughness * uRoughness;
-                
-                float facing = 0.5 + 0.5 * LdotV;
-                float rough = facing * (0.9 - 0.4 * facing) * ((0.5 + NdotH)/NdotH);
-                float Smooth = 1.05 * (1.0 - pow(1.0 - NdotL, 5.0)) * (1.0 - pow(1.0-NdotV, 5.0));
-                float single = 1.0 / PI * mix(Smooth, rough, a);
-                float multi = 0.1159 * a;
-                vec3 contrib = materialDiffuseColor * (single + materialDiffuseColor*multi);
-                return vec3(contrib);
+              
+              dY = 0.1 * dY;
+              dX = 0.1 * dX;
+
+              // Build the normalized normal
+              vec3 N = normalize(vec3(dX, 1.0 / normalStrength, dY));
+
+              //convert (-1.0 , 1.0) to (0.0 , 1.0), if needed
+              return N * 0.5 + 0.5;
             }
 
-            return vec3(0.0, 0.0, 0.0);
-        }
 
-        vec3 CookTorrance(vec3 materialDiffuseColor,
-            vec3 materialSpecularColor,
-            vec3 normal,
-            vec3 lightDir,
-            vec3 viewDir,
-            vec3 lightColor)
-        {
-            float NdotL = max(0.0, dot(normal, lightDir));
-            float Rs = 0.0;
+            void main() {
+              
+              // 
+              vec4 temp_dc = texture2D(diffuseMap, vUv);
 
-            if (NdotL > 0.0) 
-            {
-                vec3 H = normalize(lightDir + viewDir);
+              //
+              //vec3 vLightDir = pointLights[0].poistion - (-vViewPosition);
+              vec3 vLightDir = vec3(15,-15,15) - (-vViewPosition);
+              vec3 vEyeVec = vViewPosition.xyz;              
 
-                float NdotH = max(0.0, dot(normal, H));
-                float NdotV = max(0.0, dot(normal, viewDir));
-                float VdotH = max(0.0, dot(lightDir, H));
+              vec3 normal = ComputeNormals();
 
-                // Fresnel reflectance
-                float F = pow(1.0 - VdotH, 5.0);
-                F *= (1.0 - F0);
-                F += F0;
+              vec3 L = normalize(vLightDir);
+              vec3 N = normalize(normal * 2.0 - 1.0);
 
-                // Microfacet distribution by GGX
-                float alpha = uRoughness * uRoughness;
-                float r1 = pow(NdotH, 2.0)*(alpha * alpha - 1.0) + 1.0;
-                float r2 = alpha * alpha;
-                float D = r2 / pow(r1,2.0) / PI;
+              //Lambert's cosine law
+              float lambertTerm = dot(N,L);
 
-                // Geometric shadowing
-                float two_NdotH = 2.0 * NdotH;
-                float g1 = (two_NdotH * NdotV) / VdotH;
-                float g2 = (two_NdotH * NdotL) / VdotH;
-                float G = min(1.0, min(g1, g2));
+              //Diffuse Term
+              vec4 Id = vec4(1.0,1.0,1.0,1.0);
 
-                Rs = (F * D * G) / (PI * NdotL * NdotV);
+              //Specular Term
+              vec4 Is = vec4(1.0,0.0,0.0,1.0);
+
+              vec4 roughnessVector = texture2D(roughnessMap, vUv);
+              float roughness = (roughnessVector.x + roughnessVector.y + roughnessVector.z)/3.0;
+              //roughness = roughness/255.0;
+
+              vec4 uLightDiffuse = vec4(1.0,1.0,1.0,1.0);
+
+              if(lambertTerm > 0.0) //only if lambertTerm is positive
+              {
+                  Id = temp_dc * lambertTerm; //add diffuse term
+
+                  vec3 E = normalize(vEyeVec);
+                  vec3 R = reflect(L, N);
+
+                  float specular = pow( max(dot(R, E), 0.0), 1.0);
+
+                  Is = uLightDiffuse * specular; //add specular term 
+              }
+              
+              gl_FragColor = Id + Is;
+
             }
-
-            //return materialDiffuseColor * lightColor * NdotL + lightColor * materialSpecularColor * NdotL * (k + Rs * (1.0 - k));
-
-            return lightColor * materialSpecularColor * NdotL * (k + Rs * (1.0 - k));
-        }
-
-
-
-        void main()
-        {
-            vec4 tempColor = texture2D(uDiffuseMap, vUv);
-            vec3 diffuseColor = vec3(tempColor);
-            vec3 specularColor = vec3(tempColor);
-
-            //vec3 normal_temp = ComputeNormals();
-            //vec3 normal_bump = normalize(normal_temp * 2.0 - 1.0);
-            vec3 normal_bump = normalize(vNormal);
-
-            //vec4 normal_temp1 = texture2D(uNormalMap, vUv);
-            //vec3 normal_bump = normalize(normal_temp1.xyz * 2.0 -1.0);
-
-            vec3 lightColor = pointLights[0].color;
-
-            vec3 sss = CookTorrance(diffuseColor,
-                specularColor,
-                normal_bump,
-                vLightDir,
-                vViewDir,
-                lightColor);
-
-            vec3 ddd = BRDF(specularColor,
-                normal_bump,
-                vLightDir,
-                vViewDir);
-
-            //Final color
-            vec4 finalColor = vec4(ddd,1.0) + vec4(sss,1.0);
-            //vec4 finalColor = vec4(sss,1.0);
-
-            gl_FragColor = tempColor * uAmbinetCoefficient + finalColor;
-            //gl_FragColor = finalColor;
-        }
-
-
-
-    </script>
+        </script>
 
   </head>
-
-
-
   <body>
     <div id="paint">
       <canvas id="diffuse_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:0"></canvas>
@@ -291,7 +208,6 @@
       var canvas_02, ctx_bump;
       var canvas_type, ctx;
       var tool_type;
-      var mouse_type;
 
       var bunny;
 
@@ -304,7 +220,6 @@
       var controls;
       var controls_01;
 
-      // editing scene
       var camera, scene, renderer;
       var renderer_canvas;
 
@@ -312,16 +227,17 @@
       var camera_01, scene_01, renderer_01;
       var material;
 
-      var intersectionMesh;
-
-      var moving_light;
-      var bulbMat;
-      var lightHelper;
-      var lightOffset;
-
       var isPainting;
 
-    var params;
+      var params = {
+
+        color: "#1fdc35",
+        lineWidth: 1,
+        drawLight: false,
+        radius:5,
+        strength:10
+
+      };
 
       var raycaster = new THREE.Raycaster();
       var mouse = new THREE.Vector2();
@@ -342,7 +258,6 @@
 
         canvas_type = 1;
         tool_type = 1;
-        mouse_type = 1;
 
         // ********************** diffuse canvas **********************
         canvas_01 = document.getElementById( 'diffuse_canvas' );
@@ -397,19 +312,6 @@
         // controls
         controls = new THREE.OrbitControls( camera, renderer.domElement );
 
-        // intersection helper
-        intersectionMesh = new THREE.Mesh(
-          new THREE.SphereGeometry(),
-          new THREE.MeshBasicMaterial({
-            wireframe: true,
-            opacity: 0.5,
-            transparent: true,
-          })
-        );
-        intersectionMesh.visible = false;
-        scene.add( intersectionMesh );
-
-
       }
 
       function initRenderingScene(){
@@ -434,43 +336,53 @@
 
         // texture
         var roughnessMap = new THREE.TextureLoader().load( "assets/textures/brick_roughness.jpg" );
+        //console.log(roughnessMap);
+        //roughnessMap.needsUpdate = true; // important
         var diffuseMap = new THREE.TextureLoader().load( "assets/textures/brick_diffuse.jpg" );
+        //diffuseMap.needsUpdate = true; // important
+        var normalMap = new THREE.TextureLoader().load( "assets/textures/waternormals.jpg" );
         var bumpMap =  new THREE.TextureLoader().load( "assets/textures/brick_bump.jpg" );
-        var normalMap = new THREE.TextureLoader().load( "assets/textures/brick_normal.jpg" );
 
         // material
         uniforms = {
             metallic: {value: 0.0},
-            uRoughness: {value: 0.0},
-            uShininess: {value: 10.0},
-            uAmbinetCoefficient: {value:0.5},
-
-            uLightDirection: {value: new THREE.Vector3(-0.25, -0.25, -0.25)},
+            roughness: {value: 0.0},
+            albedo: {value: new THREE.Color(0xffff00)},
+            roughnessMap: { type: "t", value: roughnessMap },
+            diffuseMap: { type: "t", value: diffuse_texture },
+            normalMap: { type: "t", value: normalMap },
+            bumpMap: { type: "t", value: bump_texture },
+            diffuseType: {value:0},
             pointLights: {value:[]},
-
-            uLightAmbient:{value: new THREE.Vector4(0.3,0.3,0.3,1.0)},
-            uLightDiffuse:{value: new THREE.Vector4(1.0,1.0,1.0,1.0)},    
-            uLightSpecular:{value: new THREE.Vector4(1.0,1.0,1.0,1.0)},
-
-            uMaterialAmbient:{value: new THREE.Vector4(0.0,0.9,0.0,1.0)},
-            uMaterialDiffuse:{value: new THREE.Vector4(0.1,0.9,0.1,1.0)},
-            uMaterialSpecular:{value: new THREE.Vector4(0.0,1.0,0.0,1.0)},
-
-            uDiffuseMap: { type: "t", value: diffuse_texture },
-            uRoughnessMap: { type: "t", value: roughnessMap },
-            uBumpMap: { type: "t", value: bump_texture },
-            uNormalMap: { type: "t", value: normalMap },
-
-            uScale: {value:1.0}
+            spotLights: {value:[]},
+            directionalLights: {value:[]},
+            numPointLights: {value: 0},
+            numSpotLights: {value: 0},
+            numDirectionalLights: {value: 0}
         };
         
         for (var i=0; i<4; ++i) {
-          
             uniforms.pointLights.value.push({
                 position: new THREE.Vector3(0,0,0),
-                color: new THREE.Color(0x0000ff)
+                color: new THREE.Color(1,1,1),
+                distance: 1.0,
+                decay: 10.0
             });
-
+          
+            uniforms.spotLights.value.push({
+                position: new THREE.Vector3(0,0,0),
+                color: new THREE.Color(1,1,1),
+                direction: new THREE.Vector3(0,0,1),
+                distance: 1.0,
+                decay: 10.0,
+                coneCos: 0.0,
+                pnumbraCos: 0.0
+            });
+          
+            uniforms.directionalLights.value.push({
+                direction: new THREE.Vector3(0,0,1),
+                color: new THREE.Color(1,1,1)
+            });
         }
 
         material = new THREE.ShaderMaterial({
@@ -481,18 +393,27 @@
 
         // light
         lights = {};
+        lights.directional = new THREE.DirectionalLight(0xffffff, 10.0);
+        lights.directional.position.set(-3,10,-3);
+        lights.directionalHelper = new THREE.DirectionalLightHelper(lights.directional, 1.0);
 
-        lights.point = new THREE.PointLight(0xff0000, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
-        lights.point.position.set(-2, 2, 2);
+        lights.point = new THREE.PointLight(0xffffff, 1, 20.0);
+        lights.point.position.set(10,10,0);
 
-        var bulbGeometry = new THREE.SphereBufferGeometry( 0.07, 16, 8 );
-        bulbMat = new THREE.MeshStandardMaterial({emissive:0x000000, emissiveIntensity:1, color:0x000000});
+        lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0);
+
+        lights.spot = new THREE.SpotLight(0xffffff, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
+        lights.spot.position.set(-10, 10, 0);
+        lights.spotHelper = new THREE.SpotLightHelper(lights.spot, 1.0);
         
-        lights.point.add(new THREE.Mesh(bulbGeometry, bulbMat));
-        lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0, 0xffffff);
+        // adding lights and lighthelper to the scene
+        scene_01.add(lights.directional);
+        scene_01.add(lights.directionalHelper);
         scene_01.add(lights.point);
-        scene_01.add(lights.pointHelper);
-        
+        //scene_01.add(lights.pointHelper);
+        scene_01.add(lights.spot);
+        //scene_01.add(lights.spotHelper);
+
         window.addEventListener( 'resize', onWindowResize, false );
 
       }
@@ -525,17 +446,18 @@
 
             var sMaterial = new THREE.MeshBasicMaterial( { map: diffuse_texture } );
             var sGeometry = object.children[0].geometry;
+            console.log(sGeometry);
             var uvs = sGeometry.attributes.uv.array;
 
             bunny = new THREE.Mesh( sGeometry, sMaterial );
-            bunny.position.set(0,0,0);
+            bunny.position.set(0,-0.5,0);
             bunny.scale.set(10,10,10);
 
             scene.add( bunny );
 
             // for shader
             var sphere_01 = new THREE.Mesh( sGeometry, material );
-            sphere_01.position.set(0,0,0);
+            sphere_01.position.set(0,-0.5,0);
             sphere_01.scale.set(10,10,10);
 
             scene_01.add( sphere_01 );
@@ -545,10 +467,9 @@
       }
 
       function initListening(){
+        //container_01.addEventListener( 'resize', onWindowResize, false );
 
         document.addEventListener( 'keydown', onKeyDown, false );
-        document.addEventListener( 'keyup', onKeyUp, false );
-
 
         container.addEventListener( 'mousemove', onMouseMove, false );
         container.addEventListener( 'mousedown', mouseDown, false );
@@ -764,90 +685,29 @@
 
           break;
 
-          case 16: // 3
-            mouse_type = 2;
-            container_01.addEventListener( 'mousemove', onLightMove, false );
-
-          break;
-
         }
 
       }
 
-        function onKeyUp ( event ) {
+      function changeCanvas(){
 
-          if ( event.keyCode == 16) {
-            mouse_type = 1;
-            container_01.removeEventListener( 'mousemove', onLightMove, false );
-          }
-
-        }
-
-            function onLightMove(event) {
-
-              mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-              mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-              var x = mouse.x;
-              var y = mouse.y + 0.5;
-
-              var r = 3;
-              var temp = Math.sqrt((x * x) + (y * y));
-              var z = Math.sqrt((r * r) - (temp * temp));
-
-              var e = lightOffset;
-              lights.point.position.set(x*e, y*2*e, z);
-
-            };
+      }
 
       function setupGui() {
 
-          params = {
-
-            color: "#1fdc35",
-            lineWidth: 1,
-            drawLight: false,
-            radius:5,
-            strength:10,
-            roughness:0.5,
-            ambient:0.5,
-
-            light_color:"#ffffff",
-            offsets:5.0,
-
-            scale:1.0
-
-          };
-
           var gui = new dat.GUI();
-          gui.domElement.id = 'gui01';
 
           var f1 = gui.addFolder('Paint');
+
           f1.addColor(params, 'color');
           f1.add(params, "lineWidth", 1.0, 10.0, 0.01);
-          f1.open();
 
           var f2 = gui.addFolder('Blur');
+
           f2.add(params, "radius", 1.0, 10.0, 0.01);
           f2.add(params, "strength", 1.0, 50.0, 0.1);
-          f2.open();
-
-          var f3 = gui.addFolder('Rendering');
-          f3.add(params, "ambient", 0.0, 1.0, 0.01);
-          f3.add(params, "roughness", 0.0, 1.0, 0.01);
-          f3.open();
-
-          var f4 = gui.addFolder('Light Setting');
-          f4.addColor(params, "light_color");
-          f4.add(params, "offsets", 1.0, 10.0, 0.1);
-          f4.open();
-
-          var f5 = gui.addFolder('Bump Scale');
-          f5.add(params, "scale", 0.0, 10.0, 0.1);
-          f5.open();
 
           gui.open();
-
       }
 
       function animate() {
@@ -855,9 +715,11 @@
           diffuse_texture.needsUpdate = true;
           bump_texture.needsUpdate = true;
           
+
           requestAnimationFrame( animate );
 
           controls.update(); 
+          //stats.update();
 
           render();
 
@@ -865,31 +727,45 @@
 
       function render() {
 
-            const radius = 10 / 256;
-            intersectionMesh.scale.set( radius, radius, radius );
+          //stats.update();
 
           camera_01.updateMatrixWorld();
           camera_01.matrixWorldInverse.getInverse(camera_01.matrixWorld);
           var viewMatrix = camera_01.matrixWorldInverse;
 
-          //update uniforms
-          uniforms.uRoughness.value = params.roughness;
-          uniforms.uAmbinetCoefficient.value = params.ambient;
+          // uniforms.metallic.value = effectController.metallic;
+          // uniforms.roughness.value = effectController.roughness;
+          // uniforms.albedo.value.setHex(effectController.albedo);
+
+          uniforms.numDirectionalLights.value = 1;
+          uniforms.directionalLights.value[0].direction.copy(lights.directional.position).normalize().transformDirection(viewMatrix);
+          uniforms.directionalLights.value[0].color.copy(lights.directional.color);
+
+          uniforms.numPointLights.value = 1;
           uniforms.pointLights.value[0].position.copy(lights.point.position).applyMatrix4(viewMatrix);
-          var tempColor = new THREE.Color(params.light_color);
-          uniforms.pointLights.value[0].color.copy(tempColor);
+          uniforms.pointLights.value[0].color.copy(lights.point.color);
+          uniforms.pointLights.value[0].distance = lights.point.distance;
+          uniforms.pointLights.value[0].decay = lights.point.decay;
 
-          uniforms.uScale.value = params.scale;
+          uniforms.numSpotLights.value = 1;
+          uniforms.spotLights.value[0].position.copy(lights.spot.position).applyMatrix4(viewMatrix);
+          uniforms.spotLights.value[0].direction.copy(lights.spot.position).normalize().transformDirection(viewMatrix);
+          uniforms.spotLights.value[0].color.copy(lights.spot.color);
+          uniforms.spotLights.value[0].distance = lights.spot.distance;
+          uniforms.spotLights.value[0].decay = lights.spot.decay;
+          uniforms.spotLights.value[0].coneCos = Math.cos(lights.spot.angle);
+          uniforms.spotLights.value[0].penumbraCos = Math.cos(lights.spot.angle * (1.0 - lights.spot.penumbra));
 
-          lights.pointHelper.color = new THREE.Color(params.light_color);
-          lights.pointHelper.update();
-          lightOffset = params.offsets;
+          lights.directionalHelper.visible = params.drawLight;
+          lights.pointHelper.visible = params.drawLight;
+          lights.spotHelper.visible = params.drawLight;
 
-          bulbMat.emissive = new THREE.Color(params.light_color);
+          uniforms.diffuseType.value = 8;
 
           renderer_01.render(scene_01, camera_01);
           renderer.render(scene,camera);
 
+          //scene_01.overrideMaterial = null;
       }
 
 

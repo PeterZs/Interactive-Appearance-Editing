@@ -54,7 +54,6 @@
         uniform sampler2D uBumpMap;
         uniform sampler2D uNormalMap;
 
-        uniform float uScale;
 
         struct PointLight {
             vec3 position;
@@ -63,35 +62,19 @@
 
         uniform PointLight pointLights[LIGHT_MAX];
 
-        vec3 computeNormal(){
-
-            float texelSize;
-            float textureSize;
-
-            textureSize = 1024.0;
-            texelSize = 1.0 / textureSize;
-
-            float mu = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
-            float pv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
-            float mv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
-            float pu = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
-
-            float du = mu - pu;
-            float dv = mv - pv;
-
-            vec3 normal = normalize(vec3(du, dv, 1.0/uScale));
-
-            return normal;
-
-        }
 
 
         void main()
         {
             vUv = uv;
 
-            vNormal = computeNormal();
+            //vec3 temp_normal = ComputeNormals();
+            //vNormal = normalize(temp_normal * 2.0 - 1.0);
 
+            //vec4 temp_normal = texture2D(uNormalMap, vUv);
+            //vNormal = normalize(temp_normal.xyz * 2.0 - 1.0);
+
+            
             vPosition = vec3(modelViewMatrix * vec4(position, 1.0));
 
             vec3 lightPosition = pointLights[0].position;
@@ -218,6 +201,49 @@
         }
 
 
+        // Convert bump map to normal map
+
+        float textureSize = 1024.0;
+        float texelSize;// =  1.0 / textureSize ; //size of one texel;
+        float normalStrength = 20.0;
+             
+        vec3 ComputeNormals(){
+
+            texelSize = 1.0 / textureSize;
+
+            float tl = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1, -1)).x);   // top left
+            float  l = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
+            float bl = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1,  1)).x);   // bottom left
+            float  t = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
+            float  b = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
+            float tr = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1, -1)).x);   // top right
+            float  r = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
+            float br = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1,  1)).x);   // bottom right
+
+
+            // Compute dx using Sobel:
+            //           -1 0 1 
+            //           -2 0 2
+            //           -1 0 1
+
+            float dX = tr + 2.0*r + br -tl - 2.0*l - bl;
+
+            // Compute dy using Sobel:
+            //           -1 -2 -1 
+            //            0  0  0
+            //            1  2  1
+
+            float dY = bl + 2.0*b + br -tl - 2.0*t - tr;
+
+            dY = 0.1 * dY;
+            dX = 0.1 * dX;
+
+            // Build the normalized normal
+            vec3 N = normalize(vec3(dX, 1.0 / normalStrength, dY));
+
+            //convert (-1.0 , 1.0) to (0.0 , 1.0), if needed
+            return N * 0.5 + 0.5;
+        }
 
         void main()
         {
@@ -227,10 +253,10 @@
 
             //vec3 normal_temp = ComputeNormals();
             //vec3 normal_bump = normalize(normal_temp * 2.0 - 1.0);
-            vec3 normal_bump = normalize(vNormal);
+            //vec3 normal_bump = normalize(normal_temp);
 
-            //vec4 normal_temp1 = texture2D(uNormalMap, vUv);
-            //vec3 normal_bump = normalize(normal_temp1.xyz * 2.0 -1.0);
+            vec4 normal_temp1 = texture2D(uNormalMap, vUv);
+            vec3 normal_bump = normalize(normal_temp1.xyz * 2.0 -1.0);
 
             vec3 lightColor = pointLights[0].color;
 
@@ -258,6 +284,7 @@
 
     </script>
 
+
   </head>
 
 
@@ -281,6 +308,186 @@
     <script src="js/loaders/OBJLoader.js"></script>
 
     <script>
+
+      THREE.BufferGeometry.prototype.computeTangents = function () {
+
+    var index = this.index;
+    var attributes = this.attributes;
+
+    // based on http://www.terathon.com/code/tangent.html
+    // (per vertex tangents)
+
+    if ( index === null ||
+         attributes.position === undefined ||
+         attributes.normal === undefined ||
+         attributes.uv === undefined ) {
+
+        console.warn( 'THREE.BufferGeometry: Missing required attributes (index, position, normal or uv) in BufferGeometry.computeTangents()' );
+        return;
+
+    }
+
+    var indices = index.array;
+    var positions = attributes.position.array;
+    var normals = attributes.normal.array;
+    var uvs = attributes.uv.array;
+
+    var nVertices = positions.length / 3;
+
+    if ( attributes.tangent === undefined ) {
+
+        this.addAttribute( 'tangent', new THREE.BufferAttribute( new Float32Array( 4 * nVertices ), 4 ) );
+
+    }
+
+    var tangents = attributes.tangent.array;
+
+    var tan1 = [], tan2 = [];
+
+    for ( var k = 0; k < nVertices; k ++ ) {
+
+        tan1[ k ] = new THREE.Vector3();
+        tan2[ k ] = new THREE.Vector3();
+
+    }
+
+    var vA = new THREE.Vector3(),
+        vB = new THREE.Vector3(),
+        vC = new THREE.Vector3(),
+
+        uvA = new THREE.Vector2(),
+        uvB = new THREE.Vector2(),
+        uvC = new THREE.Vector2(),
+
+        sdir = new THREE.Vector3(),
+        tdir = new THREE.Vector3();
+
+    function handleTriangle( a, b, c ) {
+
+        vA.fromArray( positions, a * 3 );
+        vB.fromArray( positions, b * 3 );
+        vC.fromArray( positions, c * 3 );
+
+        uvA.fromArray( uvs, a * 2 );
+        uvB.fromArray( uvs, b * 2 );
+        uvC.fromArray( uvs, c * 2 );
+
+        var x1 = vB.x - vA.x;
+        var x2 = vC.x - vA.x;
+
+        var y1 = vB.y - vA.y;
+        var y2 = vC.y - vA.y;
+
+        var z1 = vB.z - vA.z;
+        var z2 = vC.z - vA.z;
+
+        var s1 = uvB.x - uvA.x;
+        var s2 = uvC.x - uvA.x;
+
+        var t1 = uvB.y - uvA.y;
+        var t2 = uvC.y - uvA.y;
+
+        var r = 1.0 / ( s1 * t2 - s2 * t1 );
+
+        sdir.set(
+            ( t2 * x1 - t1 * x2 ) * r,
+            ( t2 * y1 - t1 * y2 ) * r,
+            ( t2 * z1 - t1 * z2 ) * r
+        );
+
+        tdir.set(
+            ( s1 * x2 - s2 * x1 ) * r,
+            ( s1 * y2 - s2 * y1 ) * r,
+            ( s1 * z2 - s2 * z1 ) * r
+        );
+
+        tan1[ a ].add( sdir );
+        tan1[ b ].add( sdir );
+        tan1[ c ].add( sdir );
+
+        tan2[ a ].add( tdir );
+        tan2[ b ].add( tdir );
+        tan2[ c ].add( tdir );
+
+    }
+
+    var groups = this.groups;
+
+    if ( groups.length === 0 ) {
+
+        groups = [ {
+            start: 0,
+            count: indices.length
+        } ];
+
+    }
+
+    for ( var j = 0, jl = groups.length; j < jl; ++ j ) {
+
+        var group = groups[ j ];
+
+        var start = group.start;
+        var count = group.count;
+
+        for ( var i = start, il = start + count; i < il; i += 3 ) {
+
+            handleTriangle(
+                indices[ i + 0 ],
+                indices[ i + 1 ],
+                indices[ i + 2 ]
+            );
+
+        }
+
+    }
+
+    var tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+    var n = new THREE.Vector3(), n2 = new THREE.Vector3();
+    var w, t, test;
+
+    function handleVertex( v ) {
+
+        n.fromArray( normals, v * 3 );
+        n2.copy( n );
+
+        t = tan1[ v ];
+
+        // Gram-Schmidt orthogonalize
+
+        tmp.copy( t );
+        tmp.sub( n.multiplyScalar( n.dot( t ) ) ).normalize();
+
+        // Calculate handedness
+
+        tmp2.crossVectors( n2, t );
+        test = tmp2.dot( tan2[ v ] );
+        w = ( test < 0.0 ) ? - 1.0 : 1.0;
+
+        tangents[ v * 4 ] = tmp.x;
+        tangents[ v * 4 + 1 ] = tmp.y;
+        tangents[ v * 4 + 2 ] = tmp.z;
+        tangents[ v * 4 + 3 ] = w;
+
+    }
+
+    for ( var j = 0, jl = groups.length; j < jl; ++ j ) {
+
+        var group = groups[ j ];
+
+        var start = group.start;
+        var count = group.count;
+
+        for ( var i = start, il = start + count; i < il; i += 3 ) {
+
+            handleVertex( indices[ i + 0 ] );
+            handleVertex( indices[ i + 1 ] );
+            handleVertex( indices[ i + 2 ] );
+
+        }
+
+    }
+
+};  
 
       const size = 256;
 
@@ -311,8 +518,6 @@
       // rendering scene
       var camera_01, scene_01, renderer_01;
       var material;
-
-      var intersectionMesh;
 
       var moving_light;
       var bulbMat;
@@ -397,19 +602,6 @@
         // controls
         controls = new THREE.OrbitControls( camera, renderer.domElement );
 
-        // intersection helper
-        intersectionMesh = new THREE.Mesh(
-          new THREE.SphereGeometry(),
-          new THREE.MeshBasicMaterial({
-            wireframe: true,
-            opacity: 0.5,
-            transparent: true,
-          })
-        );
-        intersectionMesh.visible = false;
-        scene.add( intersectionMesh );
-
-
       }
 
       function initRenderingScene(){
@@ -459,9 +651,7 @@
             uDiffuseMap: { type: "t", value: diffuse_texture },
             uRoughnessMap: { type: "t", value: roughnessMap },
             uBumpMap: { type: "t", value: bump_texture },
-            uNormalMap: { type: "t", value: normalMap },
-
-            uScale: {value:1.0}
+            uNormalMap: { type: "t", value: normalMap }
         };
         
         for (var i=0; i<4; ++i) {
@@ -791,7 +981,7 @@
               var x = mouse.x;
               var y = mouse.y + 0.5;
 
-              var r = 3;
+              var r = 5;
               var temp = Math.sqrt((x * x) + (y * y));
               var z = Math.sqrt((r * r) - (temp * temp));
 
@@ -813,9 +1003,7 @@
             ambient:0.5,
 
             light_color:"#ffffff",
-            offsets:5.0,
-
-            scale:1.0
+            offsets:5.0
 
           };
 
@@ -823,28 +1011,28 @@
           gui.domElement.id = 'gui01';
 
           var f1 = gui.addFolder('Paint');
+
           f1.addColor(params, 'color');
           f1.add(params, "lineWidth", 1.0, 10.0, 0.01);
           f1.open();
 
           var f2 = gui.addFolder('Blur');
+
           f2.add(params, "radius", 1.0, 10.0, 0.01);
           f2.add(params, "strength", 1.0, 50.0, 0.1);
           f2.open();
 
           var f3 = gui.addFolder('Rendering');
+
           f3.add(params, "ambient", 0.0, 1.0, 0.01);
           f3.add(params, "roughness", 0.0, 1.0, 0.01);
           f3.open();
 
           var f4 = gui.addFolder('Light Setting');
+
           f4.addColor(params, "light_color");
           f4.add(params, "offsets", 1.0, 10.0, 0.1);
           f4.open();
-
-          var f5 = gui.addFolder('Bump Scale');
-          f5.add(params, "scale", 0.0, 10.0, 0.1);
-          f5.open();
 
           gui.open();
 
@@ -865,9 +1053,6 @@
 
       function render() {
 
-            const radius = 10 / 256;
-            intersectionMesh.scale.set( radius, radius, radius );
-
           camera_01.updateMatrixWorld();
           camera_01.matrixWorldInverse.getInverse(camera_01.matrixWorld);
           var viewMatrix = camera_01.matrixWorldInverse;
@@ -878,8 +1063,6 @@
           uniforms.pointLights.value[0].position.copy(lights.point.position).applyMatrix4(viewMatrix);
           var tempColor = new THREE.Color(params.light_color);
           uniforms.pointLights.value[0].color.copy(tempColor);
-
-          uniforms.uScale.value = params.scale;
 
           lights.pointHelper.color = new THREE.Color(params.light_color);
           lights.pointHelper.update();

@@ -1,576 +1,598 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <title>Demo</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-    <style>
-      body {
-        color: #808080;
-        font-family:Monospace;
-        font-size:13px;
-        text-align:center;
+<head>
+<title>Demo</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+<style>
 
-        background-color: #ffffff;
-        margin: 0px;
-        overflow: hidden;
-      }
+body {
+    color: #808080;
+    font-family:Monospace;
+    font-size:13px;
+    text-align:center;
 
-      #info {
-        position: absolute;
-        top: 0px; width: 100%;
-        padding: 5px;
-      }
+    background-color: #ffffff;
+    margin: 0px;
+    overflow: hidden;
+}
 
-      #controls {
-        position: absolute;
-        text-align:left;
-        top: 40px;
-        left: 5px;
-        padding: 5px;
-      }
+#info {
+    position: absolute;
+    top: 0px; width: 100%;
+    padding: 5px;
+}
 
-      .control {
-        margin-bottom: 3px;
-      }
+#controls {
+    position: absolute;
+    text-align:left;
+    top: 40px;
+    left: 5px;
+    padding: 5px;
+}
 
-      input {
-        width: 50px;
-      }
-    </style>
+.control {
+    margin-bottom: 3px;
+}
 
-    <script id="vertexShader" type="x-shader/x-vertex">
+input {
+    width: 50px;
+}
 
-        #define LIGHT_MAX 4
-        
-        varying vec3 vNormal;
-        varying vec3 vPosition;
-        varying vec2 vUv;
+</style>
 
-        varying vec3 vViewDir;
-        varying vec3 vLightDir;
-        varying float vLightDistance2;
+<script id="vertexShader" type="x-shader/x-vertex">
 
-        uniform sampler2D uBumpMap;
-        uniform sampler2D uNormalMap;
+    #define LIGHT_MAX 4
+    
+    varying vec3 vNormal;
+    varying vec2 vUv;
 
-        uniform float uScale;
+    varying vec3 vViewDir;
+    varying vec3 vLightDir;
 
-        struct PointLight {
-            vec3 position;
-            vec3 color;
-        };
+    uniform sampler2D uBumpMap;
+    uniform sampler2D uNormalMap;
 
-        uniform PointLight pointLights[LIGHT_MAX];
+    uniform float uScale;
 
-        vec3 computeNormal(){
+    struct PointLight {
+        vec3 position;
+        vec3 color;
+    };
 
-            float texelSize;
-            float textureSize;
+    uniform PointLight pointLights[LIGHT_MAX];
 
-            textureSize = 1024.0;
-            texelSize = 1.0 / textureSize;
+    vec3 computeNormal(){
 
-            float mu = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
-            float pv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
-            float mv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
-            float pu = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
+        float texelSize;
+        float textureSize;
 
-            float du = mu - pu;
-            float dv = mv - pv;
+        textureSize = 1024.0;
+        texelSize = 1.0 / textureSize;
 
-            vec3 normal = normalize(vec3(du, dv, 1.0/uScale));
+        float mu = abs(texture2D (uBumpMap, vUv + texelSize * vec2(-1,  0)).x);   // left
+        float pv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0, -1)).x);   // top
+        float mv = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 0,  1)).x);   // bottom
+        float pu = abs(texture2D (uBumpMap, vUv + texelSize * vec2( 1,  0)).x);   // right
 
-            return normal;
+        float du = mu - pu;
+        float dv = mv - pv;
 
+        vec3 normal = normalize(vec3(du, dv, 1.0/uScale));
+
+        return normal;
+
+    }
+
+    void main()
+    {
+        vUv = uv;
+
+        vNormal = computeNormal();
+
+        vec3 tempPosition = vec3(modelViewMatrix * vec4(position, 1.0));
+
+        vec3 lightPosition = pointLights[0].position;
+
+        vViewDir = normalize(-tempPosition.xyz);
+        vLightDir = lightPosition - tempPosition.xyz;
+        vLightDir /= length(vLightDir);
+
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+       
+    } 
+
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">  
+
+    #define PI 3.14159265359  
+    #define LIGHT_MAX 4
+
+    varying vec3 vNormal;
+
+    varying vec3 vViewDir;
+    varying vec3 vLightDir;
+
+    varying vec2 vUv;
+
+    uniform sampler2D uDiffuseMap;
+    uniform sampler2D uRoughnessMap;
+    uniform sampler2D uNormalMap;
+    uniform sampler2D uBumpMap;
+    
+    uniform float uRoughness;
+    uniform float uAmbinetCoefficient;
+
+    struct PointLight {
+        vec3 position;
+        vec3 color;
+    };
+
+    uniform PointLight pointLights[LIGHT_MAX];
+
+    float F0 = 0.8;
+    //float roughness = 0.9;
+    float k = 0.2;
+
+    vec3 GGXApproxDiffuse(vec3 materialDiffuseColor, vec3 normal, vec3 lightDir, vec3 viewDir, float roughness)
+    {
+        vec3 H = normalize(lightDir + viewDir);
+        float NdotL = max(0.0, dot(normal, lightDir));
+
+        float Rd = 0.0;
+
+        if (NdotL > 0.0) 
+        {
+
+            float NdotH = max(0.0, dot(normal, H));
+            float NdotV = max(0.0, dot(normal, viewDir));
+            float VdotH = max(0.0, dot(lightDir, H));
+            float LdotV = max(0.0, dot(lightDir, viewDir));
+
+            float a = roughness * roughness;
+            
+            float facing = 0.5 + 0.5 * LdotV;
+            float rough = facing * (0.9 - 0.4 * facing) * ((0.5 + NdotH)/NdotH);
+            float Smooth = 1.05 * (1.0 - pow(1.0 - NdotL, 5.0)) * (1.0 - pow(1.0-NdotV, 5.0));
+            float single = 1.0 / PI * mix(Smooth, rough, a);
+            float multi = 0.1159 * a;
+            vec3 contrib = materialDiffuseColor * (single + materialDiffuseColor*multi);
+            return vec3(contrib);
         }
 
+        return vec3(0.0, 0.0, 0.0);
+    }
 
-        void main()
-        {
-            vUv = uv;
+    vec3 CookTorranceSpecular(vec3 materialDiffuseColor, vec3 materialSpecularColor, vec3 normal, vec3 lightDir, vec3 viewDir, vec3 lightColor, float roughness)
+    {
+        float NdotL = max(0.0, dot(normal, lightDir));
+        float Rs = 0.0;
 
-            vNormal = computeNormal();
-
-            vPosition = vec3(modelViewMatrix * vec4(position, 1.0));
-
-            vec3 lightPosition = pointLights[0].position;
-
-            vViewDir = normalize(-vPosition.xyz);
-            vLightDir = lightPosition - vPosition.xyz;
-            vLightDistance2 = length(vLightDir);
-            vLightDir /= vLightDistance2;
-            vLightDistance2 *= vLightDistance2;
-
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-           
-        } 
-
-  
-    </script>
-
-    <script id="fragmentShader" type="x-shader/x-fragment">  
-
-        #define PI 3.14159265359  
-        #define LIGHT_MAX 4
-
-        varying vec3 vNormal;
-        varying vec3 vPosition;
-
-        varying vec3 vViewDir;
-        varying vec3 vLightDir;
-        varying float vLightDistance2;
-
-        varying vec2 vUv;
-
-        uniform sampler2D uDiffuseMap;
-        uniform sampler2D uRoughnessMap;
-        uniform sampler2D uNormalMap;
-        uniform sampler2D uBumpMap;
-        
-
-        uniform float uRoughness;
-        uniform float uAmbinetCoefficient;
-
-        struct PointLight {
-            vec3 position;
-            vec3 color;
-        };
-
-        uniform PointLight pointLights[LIGHT_MAX];
-
-        float F0 = 0.8;
-        //float roughness = 0.9;
-        float k = 0.2;
-        //vec3 lightColor = vec3(1, 1, 1);
-
-
-        vec3 BRDF(vec3 materialDiffuseColor, vec3 normal, vec3 lightDir, vec3 viewDir)
+        if (NdotL > 0.0) 
         {
             vec3 H = normalize(lightDir + viewDir);
-            float NdotL = max(0.0, dot(normal, lightDir));
 
-            float Rd = 0.0;
+            float NdotH = max(0.0, dot(normal, H));
+            float NdotV = max(0.0, dot(normal, viewDir));
+            float VdotH = max(0.0, dot(lightDir, H));
 
-            if (NdotL > 0.0) 
-            {
+            // Fresnel reflectance
+            float F = pow(1.0 - VdotH, 5.0);
+            F *= (1.0 - F0);
+            F += F0;
 
-                float NdotH = max(0.0, dot(normal, H));
-                float NdotV = max(0.0, dot(normal, viewDir));
-                float VdotH = max(0.0, dot(lightDir, H));
-                float LdotV = max(0.0, dot(lightDir, viewDir));
+            // Microfacet distribution by GGX
+            float alpha = roughness * roughness;
+            float r1 = pow(NdotH, 2.0)*(alpha * alpha - 1.0) + 1.0;
+            float r2 = alpha * alpha;
+            float D = r2 / pow(r1,2.0) / PI;
 
-                float a = uRoughness * uRoughness;
-                
-                float facing = 0.5 + 0.5 * LdotV;
-                float rough = facing * (0.9 - 0.4 * facing) * ((0.5 + NdotH)/NdotH);
-                float Smooth = 1.05 * (1.0 - pow(1.0 - NdotL, 5.0)) * (1.0 - pow(1.0-NdotV, 5.0));
-                float single = 1.0 / PI * mix(Smooth, rough, a);
-                float multi = 0.1159 * a;
-                vec3 contrib = materialDiffuseColor * (single + materialDiffuseColor*multi);
-                return vec3(contrib);
-            }
+            // Geometric shadowing
+            float two_NdotH = 2.0 * NdotH;
+            float g1 = (two_NdotH * NdotV) / VdotH;
+            float g2 = (two_NdotH * NdotL) / VdotH;
+            float G = min(1.0, min(g1, g2));
 
-            return vec3(0.0, 0.0, 0.0);
+            Rs = (F * D * G) / (PI * NdotL * NdotV);
         }
 
-        vec3 CookTorrance(vec3 materialDiffuseColor,
-            vec3 materialSpecularColor,
-            vec3 normal,
-            vec3 lightDir,
-            vec3 viewDir,
-            vec3 lightColor)
-        {
-            float NdotL = max(0.0, dot(normal, lightDir));
-            float Rs = 0.0;
+        return lightColor * materialSpecularColor * NdotL * (k + Rs * (1.0 - k));
+    }
 
-            if (NdotL > 0.0) 
-            {
-                vec3 H = normalize(lightDir + viewDir);
+    void main()
+    {
+        vec4 tempColor = texture2D(uDiffuseMap, vUv);
+        vec3 diffuseColor = vec3(tempColor);
+        vec3 specularColor = vec3(tempColor);
 
-                float NdotH = max(0.0, dot(normal, H));
-                float NdotV = max(0.0, dot(normal, viewDir));
-                float VdotH = max(0.0, dot(lightDir, H));
+        vec3 lightColor = pointLights[0].color;
 
-                // Fresnel reflectance
-                float F = pow(1.0 - VdotH, 5.0);
-                F *= (1.0 - F0);
-                F += F0;
+        vec4 roughnessVector = texture2D(uRoughnessMap, vUv);
+        float roughness = (roughnessVector.x + roughnessVector.y + roughnessVector.z)/3.0;
+        roughness = roughness * uRoughness;
 
-                // Microfacet distribution by GGX
-                float alpha = uRoughness * uRoughness;
-                float r1 = pow(NdotH, 2.0)*(alpha * alpha - 1.0) + 1.0;
-                float r2 = alpha * alpha;
-                float D = r2 / pow(r1,2.0) / PI;
+        vec3 Is = CookTorranceSpecular(diffuseColor, specularColor, vNormal, vLightDir, vViewDir, lightColor, roughness);
 
-                // Geometric shadowing
-                float two_NdotH = 2.0 * NdotH;
-                float g1 = (two_NdotH * NdotV) / VdotH;
-                float g2 = (two_NdotH * NdotL) / VdotH;
-                float G = min(1.0, min(g1, g2));
+        vec3 Id = GGXApproxDiffuse(specularColor, vNormal, vLightDir, vViewDir, roughness);
 
-                Rs = (F * D * G) / (PI * NdotL * NdotV);
-            }
+        vec4 finalColor = vec4(Is,1.0) + vec4(Id,1.0);
 
-            //return materialDiffuseColor * lightColor * NdotL + lightColor * materialSpecularColor * NdotL * (k + Rs * (1.0 - k));
+        gl_FragColor = tempColor * uAmbinetCoefficient + finalColor;
 
-            return lightColor * materialSpecularColor * NdotL * (k + Rs * (1.0 - k));
-        }
+    }
 
+</script>
 
+</head>
 
-        void main()
-        {
-            vec4 tempColor = texture2D(uDiffuseMap, vUv);
-            vec3 diffuseColor = vec3(tempColor);
-            vec3 specularColor = vec3(tempColor);
+<body>
+<div id="paint">
+<canvas id="diffuse_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:2"></canvas>
+<canvas id="bump_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:1"></canvas>
+<canvas id="roughness_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:0"></canvas>
+</div>
+<div id="container"></div>
+<div id="container_01"></div>
 
-            //vec3 normal_temp = ComputeNormals();
-            //vec3 normal_bump = normalize(normal_temp * 2.0 - 1.0);
-            vec3 normal_bump = normalize(vNormal);
+<script src="build/three.js"></script>
+<script src="js/loaders/OBJLoader.js"></script>
+<script src="js/controls/OrbitControls.js"></script>
 
-            //vec4 normal_temp1 = texture2D(uNormalMap, vUv);
-            //vec3 normal_bump = normalize(normal_temp1.xyz * 2.0 -1.0);
+<script src="js/Detector.js"></script>
+<script src="js/libs/stats.min.js"></script>
+<script src="js/libs/dat.gui.min.js"></script>
+<script src="js_yuan/loadFiles.js"></script>
+<script src="js/loaders/OBJLoader.js"></script>
 
-            vec3 lightColor = pointLights[0].color;
+<script>
 
-            vec3 sss = CookTorrance(diffuseColor,
-                specularColor,
-                normal_bump,
-                vLightDir,
-                vViewDir,
-                lightColor);
+const size = 256;
 
-            vec3 ddd = BRDF(specularColor,
-                normal_bump,
-                vLightDir,
-                vViewDir);
+var width = window.innerWidth;
+var height = window.innerHeight;
 
-            //Final color
-            vec4 finalColor = vec4(ddd,1.0) + vec4(sss,1.0);
-            //vec4 finalColor = vec4(sss,1.0);
+var canvas_01, ctx_diffuse;
+var canvas_02, ctx_bump;
+var canvas_03, ctx_roughness;
+var canvas_type, ctx;
+var tool_type;
+var mouse_type;
 
-            gl_FragColor = tempColor * uAmbinetCoefficient + finalColor;
-            //gl_FragColor = finalColor;
-        }
+var bunny;
 
+var diffuse_texture;
+var bump_texture;
+var roughness_texture;
 
+var container;
+var container_01;
 
-    </script>
+var controls;
+var controls_01;
 
-  </head>
+// editing scene
+var camera, scene, renderer;
+var renderer_canvas;
 
+// rendering scene
+var camera_01, scene_01, renderer_01;
+var material;
 
+var intersectionMesh;
 
-  <body>
-    <div id="paint">
-      <canvas id="diffuse_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:0"></canvas>
-      <canvas id="bump_canvas" width="256" height="256" style="border:1px solid #000000;position:fixed;left:0;top:0;z-index:-1"></canvas>
-    </div>
-    <div id="container"></div>
-    <div id="container_01"></div>
+var moving_light;
+var bulbMat;
+var lightHelper;
+var lightOffset;
 
-    <script src="build/three.js"></script>
-    <script src="js/loaders/OBJLoader.js"></script>
-    <script src="js/controls/OrbitControls.js"></script>
+var isPainting;
 
-    <script src="js/Detector.js"></script>
-    <script src="js/libs/stats.min.js"></script>
-    <script src="js/libs/dat.gui.min.js"></script>
-    <script src="js_yuan/loadFiles.js"></script>
-    <script src="js/loaders/OBJLoader.js"></script>
+var params;
 
-    <script>
+var raycaster = new THREE.Raycaster();
+var mouse = new THREE.Vector2();
+var onClickPosition = new THREE.Vector2();
 
-      const size = 256;
+initCanvas();
+init();
+initRenderingScene();
+loadingModels();
 
-      var width = window.innerWidth;
-      var height = window.innerHeight;
+initListening();
 
-      var canvas_01, ctx_diffuse;
-      var canvas_02, ctx_bump;
-      var canvas_type, ctx;
-      var tool_type;
-      var mouse_type;
+setupGui();
 
-      var bunny;
+animate();  
 
-      var diffuse_texture;
-      var bump_texture;
+function initCanvas(){
 
-      var container;
-      var container_01;
+    canvas_type = 1;
+    tool_type = 1;
+    mouse_type = 1;
 
-      var controls;
-      var controls_01;
+    // ********************** diffuse canvas **********************
+    canvas_01 = document.getElementById( 'diffuse_canvas' );
+    ctx_diffuse = canvas_01.getContext( '2d' );
 
-      // editing scene
-      var camera, scene, renderer;
-      var renderer_canvas;
+    diffuse_image = new Image();
+    diffuse_image.src = 'assets/textures/brick_diffuse.jpg';
+    diffuse_image.onload = function(){
 
-      // rendering scene
-      var camera_01, scene_01, renderer_01;
-      var material;
+        ctx_diffuse.drawImage(diffuse_image, 0, 0, 256, 256);
+    }
 
-      var intersectionMesh;
+    diffuse_texture = new THREE.Texture( canvas_01 );
 
-      var moving_light;
-      var bulbMat;
-      var lightHelper;
-      var lightOffset;
+    // ********************** bump canvas **********************
 
-      var isPainting;
+    canvas_02 = document.getElementById( 'bump_canvas' );
+    ctx_bump = canvas_02.getContext( '2d' );
 
-    var params;
+    bump_image = new Image();
+    bump_image.src = 'assets/textures/brick_bump.jpg';
+    bump_image.onload = function(){
 
-      var raycaster = new THREE.Raycaster();
-      var mouse = new THREE.Vector2();
-      var onClickPosition = new THREE.Vector2();
+        ctx_bump.drawImage(bump_image, 0, 0, 256, 256);
+    }
 
-      initCanvas();
-      init();
-      initRenderingScene();
-      loadingModels();
+    bump_texture = new THREE.Texture( canvas_02 );
 
-      initListening();
+    // ********************** roughness canvas **********************
 
-      setupGui();
+    canvas_03 = document.getElementById( 'roughness_canvas' );
+    ctx_roughness = canvas_03.getContext( '2d' );
 
-      animate();  
+    roughness_image = new Image();
+    roughness_image.src = 'assets/textures/brick_roughness.jpg';
+    roughness_image.onload = function(){
 
-      function initCanvas(){
+        ctx_roughness.drawImage(roughness_image, 0, 0, 256, 256);
+    }
 
-        canvas_type = 1;
-        tool_type = 1;
-        mouse_type = 1;
+    roughness_texture = new THREE.Texture( canvas_03 );
+}     
 
-        // ********************** diffuse canvas **********************
-        canvas_01 = document.getElementById( 'diffuse_canvas' );
-        ctx_diffuse = canvas_01.getContext( '2d' );
+function init() {
 
-        diffuse_image = new Image();
-        diffuse_image.src = 'assets/textures/brick_diffuse.jpg';
-        diffuse_image.onload = function(){
-            ctx_diffuse.drawImage(diffuse_image, 0, 0, 256, 256);
-        }
+    // three.js building a scene
+    container = document.getElementById( "container" );
 
-        diffuse_texture = new THREE.Texture( canvas_01 );
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color( 0x666666 );
 
-        // ********************** bump canvas **********************
+    var axes = new THREE.AxesHelper(50);
+    scene.add(axes);
 
-        canvas_02 = document.getElementById( 'bump_canvas' );
-        ctx_bump = canvas_02.getContext( '2d' );
+    camera = new THREE.PerspectiveCamera( 45, width / (height/2), 1, 1000 );
+    camera.position.set(0, 0, 3);
+    camera.lookAt( scene.position );
 
-        bump_image = new Image();
-        bump_image.src = 'assets/textures/brick_bump.jpg';
-        bump_image.onload = function(){
-            ctx_bump.drawImage(bump_image, 0, 0, 256, 256);
-        }
+    // cameraPerspectiveHelper = new THREE.CameraHelper( camera );
+    // scene.add( cameraPerspectiveHelper );
 
-        bump_texture = new THREE.Texture( canvas_02 );
+    renderer = new THREE.WebGLRenderer();
+    renderer.setPixelRatio( window.devicePixelRatio );
+    renderer.setSize( width, height/2 );
+    container.appendChild( renderer.domElement );
 
-      }     
+    // controls
+    controls = new THREE.OrbitControls( camera, renderer.domElement );
 
-      function init() {
-
-        // three.js building a scene
-        container = document.getElementById( "container" );
-
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color( 0x666666 );
-
-        var axes = new THREE.AxesHelper(50);
-        scene.add(axes);
-
-        camera = new THREE.PerspectiveCamera( 45, width / (height/2), 1, 1000 );
-        camera.position.set(0, 0, 3);
-        camera.lookAt( scene.position );
-
-        // cameraPerspectiveHelper = new THREE.CameraHelper( camera );
-        // scene.add( cameraPerspectiveHelper );
-
-        renderer = new THREE.WebGLRenderer();
-        renderer.setPixelRatio( window.devicePixelRatio );
-        renderer.setSize( width, height/2 );
-        container.appendChild( renderer.domElement );
-
-        // controls
-        controls = new THREE.OrbitControls( camera, renderer.domElement );
-
-        // intersection helper
-        intersectionMesh = new THREE.Mesh(
-          new THREE.SphereGeometry(),
-          new THREE.MeshBasicMaterial({
+    // intersection helper
+    intersectionMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(),
+        new THREE.MeshBasicMaterial({
             wireframe: true,
             opacity: 0.5,
             transparent: true,
-          })
-        );
-        intersectionMesh.visible = false;
-        scene.add( intersectionMesh );
+        })
+    );
+    intersectionMesh.visible = false;
+    scene.add( intersectionMesh );
 
+}
 
-      }
+function initRenderingScene(){
 
-      function initRenderingScene(){
+    container_01 = document.getElementById( "container_01" );
 
-        container_01 = document.getElementById( "container_01" );
+    scene_01 = new THREE.Scene();
+    scene_01.background = new THREE.Color( 0xcccccc );
+    scene_01.fog = new THREE.FogExp2( 0xcccccc, 0.002 );
 
-        scene_01 = new THREE.Scene();
-        scene_01.background = new THREE.Color( 0xcccccc );
-        scene_01.fog = new THREE.FogExp2( 0xcccccc, 0.002 );
+    renderer_01 = new THREE.WebGLRenderer({ antialias: true });
+    renderer_01.setPixelRatio( window.devicePixelRatio );
+    renderer_01.setSize( width, height/2 );
+    container_01.appendChild( renderer_01.domElement );
 
-        renderer_01 = new THREE.WebGLRenderer({ antialias: true });
-        renderer_01.setPixelRatio( window.devicePixelRatio );
-        renderer_01.setSize( width, height/2 );
-        container_01.appendChild( renderer_01.domElement );
+    camera_01 = new THREE.PerspectiveCamera( 45, width / (height/2), 1, 1000 );
+    camera_01.position.set( 0, 0, 3 );
+    camera_01.lookAt( scene_01.position );
 
-        camera_01 = new THREE.PerspectiveCamera( 45, width / (height/2), 1, 1000 );
-        camera_01.position.set( 0, 0, 3 );
-        camera_01.lookAt( scene_01.position );
+    // controls
+    controls_01 = new THREE.OrbitControls( camera_01, renderer_01.domElement );
 
-        // controls
-        controls_01 = new THREE.OrbitControls( camera_01, renderer_01.domElement );
+    // texture
+    var roughnessMap = new THREE.TextureLoader().load( "assets/textures/brick_roughness.jpg" );
+    var diffuseMap = new THREE.TextureLoader().load( "assets/textures/brick_diffuse.jpg" );
+    var bumpMap =  new THREE.TextureLoader().load( "assets/textures/brick_bump.jpg" );
+    var normalMap = new THREE.TextureLoader().load( "assets/textures/brick_normal.jpg" );
 
-        // texture
-        var roughnessMap = new THREE.TextureLoader().load( "assets/textures/brick_roughness.jpg" );
-        var diffuseMap = new THREE.TextureLoader().load( "assets/textures/brick_diffuse.jpg" );
-        var bumpMap =  new THREE.TextureLoader().load( "assets/textures/brick_bump.jpg" );
-        var normalMap = new THREE.TextureLoader().load( "assets/textures/brick_normal.jpg" );
+    // material
+    uniforms = {
+        metallic: {value: 0.0},
+        uRoughness: {value: 0.0},
+        uShininess: {value: 10.0},
+        uAmbinetCoefficient: {value:0.5},
 
-        // material
-        uniforms = {
-            metallic: {value: 0.0},
-            uRoughness: {value: 0.0},
-            uShininess: {value: 10.0},
-            uAmbinetCoefficient: {value:0.5},
+        uLightDirection: {value: new THREE.Vector3(-0.25, -0.25, -0.25)},
+        pointLights: {value:[]},
 
-            uLightDirection: {value: new THREE.Vector3(-0.25, -0.25, -0.25)},
-            pointLights: {value:[]},
+        uLightAmbient:{value: new THREE.Vector4(0.3,0.3,0.3,1.0)},
+        uLightDiffuse:{value: new THREE.Vector4(1.0,1.0,1.0,1.0)},    
+        uLightSpecular:{value: new THREE.Vector4(1.0,1.0,1.0,1.0)},
 
-            uLightAmbient:{value: new THREE.Vector4(0.3,0.3,0.3,1.0)},
-            uLightDiffuse:{value: new THREE.Vector4(1.0,1.0,1.0,1.0)},    
-            uLightSpecular:{value: new THREE.Vector4(1.0,1.0,1.0,1.0)},
+        uMaterialAmbient:{value: new THREE.Vector4(0.0,0.9,0.0,1.0)},
+        uMaterialDiffuse:{value: new THREE.Vector4(0.1,0.9,0.1,1.0)},
+        uMaterialSpecular:{value: new THREE.Vector4(0.0,1.0,0.0,1.0)},
 
-            uMaterialAmbient:{value: new THREE.Vector4(0.0,0.9,0.0,1.0)},
-            uMaterialDiffuse:{value: new THREE.Vector4(0.1,0.9,0.1,1.0)},
-            uMaterialSpecular:{value: new THREE.Vector4(0.0,1.0,0.0,1.0)},
+        uDiffuseMap: { type: "t", value: diffuse_texture },
+        uRoughnessMap: { type: "t", value: roughness_texture },
+        uBumpMap: { type: "t", value: bump_texture },
+        uNormalMap: { type: "t", value: normalMap },
 
-            uDiffuseMap: { type: "t", value: diffuse_texture },
-            uRoughnessMap: { type: "t", value: roughnessMap },
-            uBumpMap: { type: "t", value: bump_texture },
-            uNormalMap: { type: "t", value: normalMap },
+        uScale: {value:1.0}
+    };
 
-            uScale: {value:1.0}
-        };
-        
-        for (var i=0; i<4; ++i) {
-          
-            uniforms.pointLights.value.push({
-                position: new THREE.Vector3(0,0,0),
-                color: new THREE.Color(0x0000ff)
-            });
-
-        }
-
-        material = new THREE.ShaderMaterial({
-            uniforms: uniforms,
-            vertexShader: document.getElementById( 'vertexShader' ).textContent,
-            fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+    for (var i=0; i<4; ++i) {
+      
+        uniforms.pointLights.value.push({
+            position: new THREE.Vector3(0,0,0),
+            color: new THREE.Color(0x0000ff)
         });
 
-        // light
-        lights = {};
+    }
 
-        lights.point = new THREE.PointLight(0xff0000, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
-        lights.point.position.set(-2, 2, 2);
+    material = new THREE.ShaderMaterial({
+        uniforms: uniforms,
+        vertexShader: document.getElementById( 'vertexShader' ).textContent,
+        fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+    });
 
-        var bulbGeometry = new THREE.SphereBufferGeometry( 0.07, 16, 8 );
-        bulbMat = new THREE.MeshStandardMaterial({emissive:0x000000, emissiveIntensity:1, color:0x000000});
-        
-        lights.point.add(new THREE.Mesh(bulbGeometry, bulbMat));
-        lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0, 0xffffff);
-        scene_01.add(lights.point);
-        scene_01.add(lights.pointHelper);
-        
-        window.addEventListener( 'resize', onWindowResize, false );
+    // light
+    lights = {};
 
-      }
+    lights.point = new THREE.PointLight(0xff0000, 1.0, 30.0, 30*THREE.Math.DEG2RAD, 1);
+    lights.point.position.set(-2, 2, 2);
 
-      function loadingModels(){
+    var bulbGeometry = new THREE.SphereBufferGeometry( 0.07, 16, 8 );
+    bulbMat = new THREE.MeshStandardMaterial({emissive:0x000000, emissiveIntensity:1, color:0x000000});
 
-        // loading a texture file
-        var manager = new THREE.LoadingManager();
+    lights.point.add(new THREE.Mesh(bulbGeometry, bulbMat));
+    lights.pointHelper = new THREE.PointLightHelper(lights.point, 1.0, 0xffffff);
+    scene_01.add(lights.point);
+    scene_01.add(lights.pointHelper);
 
-        // loading a sphere (.obj)
-        manager.onProgress = function ( item, loaded, total ) {
-            //console.log( item, loaded, total );
-        };
+    window.addEventListener( 'resize', onWindowResize, false );
 
+}
 
-        // model
-        var onProgress = function ( xhr ) {
-            if ( xhr.lengthComputable ) {
-                var percentComplete = xhr.loaded / xhr.total * 100;
-                console.log( Math.round(percentComplete, 2) + '% downloaded' );
-            }
-        };
+function loadingModels(){
 
-        var onError = function ( xhr ) {
+    // loading a texture file
+    var manager = new THREE.LoadingManager();
 
-        };
-
-        var loader = new THREE.OBJLoader( manager );
-        loader.load( 'assets/models/obj/bunny_uv_01.obj', function ( object ) {
-
-            var sMaterial = new THREE.MeshBasicMaterial( { map: diffuse_texture } );
-            var sGeometry = object.children[0].geometry;
-            var uvs = sGeometry.attributes.uv.array;
-
-            bunny = new THREE.Mesh( sGeometry, sMaterial );
-            bunny.position.set(0,0,0);
-            bunny.scale.set(10,10,10);
-
-            scene.add( bunny );
-
-            // for shader
-            var sphere_01 = new THREE.Mesh( sGeometry, material );
-            sphere_01.position.set(0,0,0);
-            sphere_01.scale.set(10,10,10);
-
-            scene_01.add( sphere_01 );
-
-        }, onProgress, onError );
-
-      }
-
-      function initListening(){
-
-        document.addEventListener( 'keydown', onKeyDown, false );
-        document.addEventListener( 'keyup', onKeyUp, false );
+    // loading a sphere (.obj)
+    manager.onProgress = function ( item, loaded, total ) {
+        //console.log( item, loaded, total );
+    };
 
 
-        container.addEventListener( 'mousemove', onMouseMove, false );
-        container.addEventListener( 'mousedown', mouseDown, false );
-        container.addEventListener( 'mouseup', mouseUp, false );
-        container.addEventListener( 'mouseleave', mouseLeave, false );
-      }
+    // model
+    var onProgress = function ( xhr ) {
+        if ( xhr.lengthComputable ) {
+            var percentComplete = xhr.loaded / xhr.total * 100;
+            console.log( Math.round(percentComplete, 2) + '% downloaded' );
+        }
+    };
 
-      function onWindowResize() {
+    var onError = function ( xhr ) {
 
-        camera_01.aspect = window.innerWidth / window.innerHeight;
-        camera_01.updateProjectionMatrix();
+    };
 
-        renderer_01.setSize( window.innerWidth, window.innerHeight / 2 );
+    var loader = new THREE.OBJLoader( manager );
+    loader.load( 'assets/models/obj/bunny_uv_01.obj', function ( object ) {
 
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+        var sMaterial = new THREE.MeshBasicMaterial( { map: diffuse_texture } );
+        var sGeometry = object.children[0].geometry;
+        var uvs = sGeometry.attributes.uv.array;
 
-        renderer.setSize( window.innerWidth, window.innerHeight / 2 );
+        bunny = new THREE.Mesh( sGeometry, sMaterial );
+        bunny.position.set(0,0,0);
+        bunny.scale.set(10,10,10);
 
-      }
+        scene.add( bunny );
 
-      function mouseDown(e){
+        // for shader
+        var sphere_01 = new THREE.Mesh( sGeometry, material );
+        sphere_01.position.set(0,0,0);
+        sphere_01.scale.set(10,10,10);
+
+        scene_01.add( sphere_01 );
+
+    }, onProgress, onError );
+
+}
+
+function initListening(){
+
+    document.addEventListener( 'keydown', onKeyDown, false );
+    document.addEventListener( 'keyup', onKeyUp, false );
+
+
+    container.addEventListener( 'mousemove', onMouseMove, false );
+    container.addEventListener( 'mousedown', mouseDown, false );
+    container.addEventListener( 'mouseup', mouseUp, false );
+    container.addEventListener( 'mouseleave', mouseLeave, false );
+}
+
+function onWindowResize() {
+
+    camera_01.aspect = window.innerWidth / window.innerHeight;
+    camera_01.updateProjectionMatrix();
+
+    renderer_01.setSize( window.innerWidth, window.innerHeight / 2 );
+
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize( window.innerWidth, window.innerHeight / 2 );
+
+}
+
+function mouseDown(e){
+
+    var array = getMousePosition( container, e.clientX, e.clientY );
+    onClickPosition.fromArray( array );
+
+    var intersects = getIntersects( onClickPosition, scene.children );
+
+    if ( intersects.length > 0 && intersects[ 0 ].uv ) {
+
+        controls.enabled = false;
+        isPainting = true;
+
+        var uv = intersects[ 0 ].uv;
+        intersects[ 0 ].object.material.map.transformUv( uv );
+
+        var x = uv.x;
+        var y = uv.y;
+
+        x = Math.round(x * 255);
+        y = Math.round(y * 255);
+
+        // painting
+        startPaint();
+
+    }
+  
+}
+
+function mouseUp(e){
+    isPainting = false;
+    controls.enabled = true;
+}
+
+function mouseLeave(e){
+    isPainting = false;
+    controls.enabled = true;
+}
+
+function onMouseMove( e ) {
+
+    if(isPainting){
 
         var array = getMousePosition( container, e.clientX, e.clientY );
         onClickPosition.fromArray( array );
@@ -578,46 +600,6 @@
         var intersects = getIntersects( onClickPosition, scene.children );
 
         if ( intersects.length > 0 && intersects[ 0 ].uv ) {
-
-          controls.enabled = false;
-          isPainting = true;
-
-          var uv = intersects[ 0 ].uv;
-          intersects[ 0 ].object.material.map.transformUv( uv );
-
-          var x = uv.x;
-          var y = uv.y;
-
-          x = Math.round(x * 255);
-          y = Math.round(y * 255);
-
-          // painting
-          startPaint();
-
-        }
-          
-      }
-
-      function mouseUp(e){
-        isPainting = false;
-        controls.enabled = true;
-      }
-
-      function mouseLeave(e){
-        isPainting = false;
-        controls.enabled = true;
-      }
-
-      function onMouseMove( e ) {
-
-        if(isPainting){
-
-          var array = getMousePosition( container, e.clientX, e.clientY );
-          onClickPosition.fromArray( array );
-
-          var intersects = getIntersects( onClickPosition, scene.children );
-
-          if ( intersects.length > 0 && intersects[ 0 ].uv ) {
 
             controls.enabled = false;
             isPainting = true;
@@ -633,268 +615,324 @@
 
             onPaint(x,y);
 
-          }
+        }
+    }
+}
 
+function blur(x, y, radius, strength){
+
+    var xx = x - radius/2;
+    var yy = y - radius/2;
+
+    var imageData = ctx_diffuse.getImageData(xx, yy, radius, radius);
+    var filtered = ImageFilters.GaussianBlur(imageData, strength);
+    ctx_diffuse.putImageData(filtered, xx, yy);
+
+}
+
+var startPaint = function(x,y) {
+
+    if(canvas_type == 1){
+
+        if (tool_type == 1) {
+
+            ctx_diffuse.strokeStyle = params.color;
+            ctx_diffuse.lineWidth = params.lineWidth;
+            ctx_diffuse.beginPath();
+            ctx_diffuse.moveTo(x, y);
         }
 
-      }
+        if (tool_type == 2) {
 
-      function blur(x, y, radius, strength){
+            var r = params.radius;
+            var imageData = ctx_diffuse.getImageData((x - r/2), (y - r/2), r, r);
+            var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
+            ctx_diffuse.putImageData(filtered, (x - r/2), (y - r/2));
+        }
+    }
 
-        var xx = x - radius/2;
-        var yy = y - radius/2;
-        
-        var imageData = ctx_diffuse.getImageData(xx, yy, radius, radius);
-        var filtered = ImageFilters.GaussianBlur(imageData, strength);
-        ctx_diffuse.putImageData(filtered, xx, yy);
+    if (canvas_type == 2) {
 
-      }
+        if (tool_type == 1) {
 
-      var startPaint = function(x,y) {
+            ctx_bump.strokeStyle = params.color;
+            ctx_bump.lineWidth = params.lineWidth;
+            ctx_bump.beginPath();
+            ctx_bump.moveTo(x, y);
+        }
 
-          if(canvas_type == 1){
-            if (tool_type == 1) {
-              ctx_diffuse.strokeStyle = params.color;
-              ctx_diffuse.lineWidth = params.lineWidth;
-              ctx_diffuse.beginPath();
-              ctx_diffuse.moveTo(x, y);
-            }
-            if (tool_type == 2) {
-              var r = params.radius;
-              var imageData = ctx_diffuse.getImageData((x - r/2), (y - r/2), r, r);
-              var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
-              ctx_diffuse.putImageData(filtered, (x - r/2), (y - r/2));
-            }
-          }
+        if (tool_type == 2) {
 
-          if (canvas_type == 2) {
-            if (tool_type == 1) {
-              ctx_bump.strokeStyle = params.color;
-              ctx_bump.lineWidth = params.lineWidth;
-              ctx_bump.beginPath();
-              ctx_bump.moveTo(x, y);
-            }
-            if (tool_type == 2) {
-              var r = params.radius;
-              var imageData = ctx_bump.getImageData((x - r/2), (y - r/2), r, r);
-              var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
-              ctx_bump.putImageData(filtered, (x - r/2), (y - r/2));
-            }            
-          }
+            var r = params.radius;
+            var imageData = ctx_bump.getImageData((x - r/2), (y - r/2), r, r);
+            var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
+            ctx_bump.putImageData(filtered, (x - r/2), (y - r/2));
+        }            
+    }
 
-      };
+    if (canvas_type == 3) {
 
-      var onPaint = function(x,y) {
+        if (tool_type == 1) {
 
-          if(canvas_type == 1){
+            ctx_roughness.strokeStyle = params.color;
+            ctx_roughness.lineWidth = params.lineWidth;
+            ctx_roughness.beginPath();
+            ctx_roughness.moveTo(x, y);
+        }
 
-            if (tool_type == 1) {
-              ctx_diffuse.lineTo(x, y);
-              ctx_diffuse.stroke();
-            }
-            if (tool_type == 2) {
-              var r = params.radius;
-              var imageData = ctx_diffuse.getImageData((x - r/2), (y - r/2), r, r);
-              var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
-              ctx_diffuse.putImageData(filtered, (x - r/2), (y - r/2));
-            }
-          }
+        if (tool_type == 2) {
 
-          if(canvas_type == 2) {
-            if (tool_type == 1) {
-              ctx_bump.lineTo(x, y);
-              ctx_bump.stroke();
-            }
-            if (tool_type == 2) {
-              var r = params.radius;
-              var imageData = ctx_bump.getImageData((x - r/2), (y - r/2), r, r);
-              var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
-              ctx_bump.putImageData(filtered, (x - r/2), (y - r/2));
-            }
+            var r = params.radius;
+            var imageData = ctx_roughness.getImageData((x - r/2), (y - r/2), r, r);
+            var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
+            ctx_roughness.putImageData(filtered, (x - r/2), (y - r/2));
+        }            
+    }
 
-          }
+};
 
-      };
+var onPaint = function(x,y) {
 
-      var getMousePosition = function ( dom, x, y ) {
+    if(canvas_type == 1){
 
-        var rect = dom.getBoundingClientRect();
-        return [ ( x - rect.left ) / rect.width, ( y - rect.top ) / rect.height ];
+        if (tool_type == 1) {
 
-      };
+            ctx_diffuse.lineTo(x, y);
+            ctx_diffuse.stroke();
+        }
 
-      var getIntersects = function ( point, objects ) {
+        if (tool_type == 2) {
 
-        mouse.set( ( point.x * 2 ) - 1, - ( point.y * 2 ) + 1 );
+            var r = params.radius;
+            var imageData = ctx_diffuse.getImageData((x - r/2), (y - r/2), r, r);
+            var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
+            ctx_diffuse.putImageData(filtered, (x - r/2), (y - r/2));
+        }
+    }
 
-        raycaster.setFromCamera( mouse, camera );
+    if(canvas_type == 2) {
 
-        return raycaster.intersectObjects( objects );
+        if (tool_type == 1) {
 
-      };
+            ctx_bump.lineTo(x, y);
+            ctx_bump.stroke();
+        }
+
+        if (tool_type == 2) {
+
+            var r = params.radius;
+            var imageData = ctx_bump.getImageData((x - r/2), (y - r/2), r, r);
+            var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
+            ctx_bump.putImageData(filtered, (x - r/2), (y - r/2));
+        }
+    }
+
+    if(canvas_type == 3) {
+
+        if (tool_type == 1) {
+
+            ctx_roughness.lineTo(x, y);
+            ctx_roughness.stroke();
+        }
+
+        if (tool_type == 2) {
+
+            var r = params.radius;
+            var imageData = ctx_roughness.getImageData((x - r/2), (y - r/2), r, r);
+            var filtered = ImageFilters.GaussianBlur(imageData, params.strength);
+            ctx_roughness.putImageData(filtered, (x - r/2), (y - r/2));
+        }
+    }    
+};
+
+var getMousePosition = function ( dom, x, y ) {
+
+    var rect = dom.getBoundingClientRect();
+    
+    return [ ( x - rect.left ) / rect.width, ( y - rect.top ) / rect.height ];
+
+};
+
+var getIntersects = function ( point, objects ) {
+
+    mouse.set( ( point.x * 2 ) - 1, - ( point.y * 2 ) + 1 );
+
+    raycaster.setFromCamera( mouse, camera );
+
+    return raycaster.intersectObjects( objects );
+
+};
 
 
-      function onKeyDown ( event ) {
+function onKeyDown ( event ) {
 
-        bunny.material.needsUpdate = true;
+    bunny.material.needsUpdate = true;
 
-        switch ( event.keyCode ) {
+    switch ( event.keyCode ) {
 
-          case 49: // 1
+        case 49: // 1
             canvas_type = 1;
-            canvas_01.style.zIndex = 1;
-            canvas_02.style.zIndex = 0;
+            canvas_01.style.zIndex = 2;
+            canvas_02.style.zIndex = 1;
+            canvas_03.style.zIndex = 0;
             bunny.material.map = diffuse_texture;
-          break;
+        break;
 
-          case 50: // 2
+        case 50: // 2
             canvas_type = 2;
+            canvas_02.style.zIndex = 2;
+            canvas_01.style.zIndex = 1;
+            canvas_03.style.zIndex = 0;
+            bunny.material.map = bump_texture;
+        break;
+
+        case 51: // 3
+            canvas_type = 3;
+            canvas_03.style.zIndex = 2;
             canvas_02.style.zIndex = 1;
             canvas_01.style.zIndex = 0;
-            bunny.material.map = bump_texture;
-          break;
+            bunny.material.map = roughness_texture;
+        break;
 
-          case 51: // 3
+        case 52: // 3
             tool_type = 1;
+        break;
 
-          break;
-
-          case 52: // 3
+        case 53: // 3
             tool_type = 2;
+        break;
 
-          break;
-
-          case 16: // 3
+        case 16: // 3
             mouse_type = 2;
             container_01.addEventListener( 'mousemove', onLightMove, false );
+        break;
 
-          break;
+    }
 
-        }
+}
 
-      }
+function onKeyUp ( event ) {
 
-        function onKeyUp ( event ) {
+    if ( event.keyCode == 16) {
+        mouse_type = 1;
+        container_01.removeEventListener( 'mousemove', onLightMove, false );
+    }
 
-          if ( event.keyCode == 16) {
-            mouse_type = 1;
-            container_01.removeEventListener( 'mousemove', onLightMove, false );
-          }
+}
 
-        }
+function onLightMove(event) {
 
-            function onLightMove(event) {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-              mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-              mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    var x = mouse.x;
+    var y = mouse.y + 0.5;
 
-              var x = mouse.x;
-              var y = mouse.y + 0.5;
+    var r = 3;
+    var temp = Math.sqrt((x * x) + (y * y));
+    var z = Math.sqrt((r * r) - (temp * temp));
 
-              var r = 3;
-              var temp = Math.sqrt((x * x) + (y * y));
-              var z = Math.sqrt((r * r) - (temp * temp));
+    var e = lightOffset;
+    lights.point.position.set(x*e, y*2*e, z);
 
-              var e = lightOffset;
-              lights.point.position.set(x*e, y*2*e, z);
+};
 
-            };
+function setupGui() {
 
-      function setupGui() {
+    params = {
 
-          params = {
+        color: "#1fdc35",
+        lineWidth: 1,
+        drawLight: false,
+        radius:5,
+        strength:10,
+        roughness:0.7,
+        ambient:0.5,
 
-            color: "#1fdc35",
-            lineWidth: 1,
-            drawLight: false,
-            radius:5,
-            strength:10,
-            roughness:0.5,
-            ambient:0.5,
+        light_color:"#ffffff",
+        offsets:5.0,
 
-            light_color:"#ffffff",
-            offsets:5.0,
+        scale:1.0
 
-            scale:1.0
+    };
 
-          };
+    var gui = new dat.GUI();
+    gui.domElement.id = 'gui01';
 
-          var gui = new dat.GUI();
-          gui.domElement.id = 'gui01';
+    var f1 = gui.addFolder('Paint');
+    f1.addColor(params, 'color');
+    f1.add(params, "lineWidth", 1.0, 10.0, 0.01);
+    f1.open();
 
-          var f1 = gui.addFolder('Paint');
-          f1.addColor(params, 'color');
-          f1.add(params, "lineWidth", 1.0, 10.0, 0.01);
-          f1.open();
+    var f2 = gui.addFolder('Blur');
+    f2.add(params, "radius", 1.0, 10.0, 0.01);
+    f2.add(params, "strength", 1.0, 50.0, 0.1);
+    f2.open();
 
-          var f2 = gui.addFolder('Blur');
-          f2.add(params, "radius", 1.0, 10.0, 0.01);
-          f2.add(params, "strength", 1.0, 50.0, 0.1);
-          f2.open();
+    var f3 = gui.addFolder('Rendering');
+    f3.add(params, "ambient", 0.0, 1.0, 0.01);
+    f3.add(params, "roughness", 0.0, 1.0, 0.01);
+    f3.open();
 
-          var f3 = gui.addFolder('Rendering');
-          f3.add(params, "ambient", 0.0, 1.0, 0.01);
-          f3.add(params, "roughness", 0.0, 1.0, 0.01);
-          f3.open();
+    var f4 = gui.addFolder('Light Setting');
+    f4.addColor(params, "light_color");
+    f4.add(params, "offsets", 1.0, 10.0, 0.1);
+    f4.open();
 
-          var f4 = gui.addFolder('Light Setting');
-          f4.addColor(params, "light_color");
-          f4.add(params, "offsets", 1.0, 10.0, 0.1);
-          f4.open();
+    var f5 = gui.addFolder('Bump Scale');
+    f5.add(params, "scale", 0.0, 10.0, 0.1);
+    f5.open();
 
-          var f5 = gui.addFolder('Bump Scale');
-          f5.add(params, "scale", 0.0, 10.0, 0.1);
-          f5.open();
+    gui.open();
 
-          gui.open();
+}
 
-      }
+function animate() {
 
-      function animate() {
+    diffuse_texture.needsUpdate = true;
+    bump_texture.needsUpdate = true;
+    roughness_texture.needsUpdate = true;
 
-          diffuse_texture.needsUpdate = true;
-          bump_texture.needsUpdate = true;
-          
-          requestAnimationFrame( animate );
+    requestAnimationFrame( animate );
 
-          controls.update(); 
+    controls.update(); 
 
-          render();
+    render();
 
-      }
+}
 
-      function render() {
+function render() {
 
-            const radius = 10 / 256;
-            intersectionMesh.scale.set( radius, radius, radius );
+    const radius = 10 / 256;
+    intersectionMesh.scale.set( radius, radius, radius );
 
-          camera_01.updateMatrixWorld();
-          camera_01.matrixWorldInverse.getInverse(camera_01.matrixWorld);
-          var viewMatrix = camera_01.matrixWorldInverse;
+    camera_01.updateMatrixWorld();
+    camera_01.matrixWorldInverse.getInverse(camera_01.matrixWorld);
+    var viewMatrix = camera_01.matrixWorldInverse;
 
-          //update uniforms
-          uniforms.uRoughness.value = params.roughness;
-          uniforms.uAmbinetCoefficient.value = params.ambient;
-          uniforms.pointLights.value[0].position.copy(lights.point.position).applyMatrix4(viewMatrix);
-          var tempColor = new THREE.Color(params.light_color);
-          uniforms.pointLights.value[0].color.copy(tempColor);
+    //update uniforms
+    uniforms.uRoughness.value = params.roughness;
+    uniforms.uAmbinetCoefficient.value = params.ambient;
+    uniforms.pointLights.value[0].position.copy(lights.point.position).applyMatrix4(viewMatrix);
+    var tempColor = new THREE.Color(params.light_color);
+    uniforms.pointLights.value[0].color.copy(tempColor);
 
-          uniforms.uScale.value = params.scale;
+    uniforms.uScale.value = params.scale;
 
-          lights.pointHelper.color = new THREE.Color(params.light_color);
-          lights.pointHelper.update();
-          lightOffset = params.offsets;
+    lights.pointHelper.color = new THREE.Color(params.light_color);
+    lights.pointHelper.update();
+    lightOffset = params.offsets;
 
-          bulbMat.emissive = new THREE.Color(params.light_color);
+    bulbMat.emissive = new THREE.Color(params.light_color);
 
-          renderer_01.render(scene_01, camera_01);
-          renderer.render(scene,camera);
+    renderer_01.render(scene_01, camera_01);
+    renderer.render(scene,camera);
 
-      }
-
+}
 
 
-    </script>
-    <script src="js_yuan/imagefilters.js"></script>
-  </body>
+
+</script>
+<script src="js_yuan/imagefilters.js"></script>
+</body>
 </html>
